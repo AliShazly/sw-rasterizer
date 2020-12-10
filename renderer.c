@@ -6,82 +6,14 @@
 #include <limits.h>
 #include <math.h>
 #include <string.h>
+#include <time.h>
 
 // https://github.com/datenwolf/linmath.h
 //   i made all the vec# types doubles, added string.h
 #include "lib/linmath_d.h"
 
 #include "obj_parser.h"
-
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "lib/stb_image_write.h"
-
-typedef struct
-{
-    int rows;
-    int cols;
-    uint8_t *buffer;
-    double *z_buffer;
-    double subpixel;
-
-}RenderCtx;
-
-double normalize(double val, double upper, double lower);
-void mesh_bounds(vec3 *verts, size_t n_verts, vec3 out_min, vec3 out_max);
-void mesh_centroid(vec3 dst, vec3 *verts, size_t n_verts);
-
-int orient2d(vec2 a, vec2 b, vec2 c);
-void triangle_bbox(vec3 triangle[3], double *max_x, double *max_y, double *min_x, double *min_y);
-void draw_triangle(vec3 triangle[3], uint8_t fill, RenderCtx *ctx);
-
-void surface_normal(vec3 dst, vec3 *triangle);
-void camera_transform(mat4x4 dst, vec3 camera_pos, vec3 target, vec3 up);
-
-void ortho_projection(vec2 dst, vec3 pt, vec2 scale, vec2 offset);
-void draw_object(double (*verts)[3], size_t n_verts, RenderCtx *ctx);
-
-void dump_array(const char *tag, int rows, int cols, uint8_t array[rows][cols]);
-
-
-int main(void)
-{
-    size_t size;
-    double (*verts)[3];
-    double (*texcoords)[2];
-    double (*normals)[3];
-
-    parse_obj("models/teapot_maya_big.obj", &size, &verts, &texcoords, &normals);
-
-    // parse_obj should return all faces as tris, but let's make sure
-    assert(size % 3 == 0);
-
-    int rows = 1024;
-    int cols = 1024;
-
-    uint8_t *buffer = calloc(rows * cols, sizeof(uint8_t));
-    assert(buffer != NULL);
-
-    double *z_buffer = calloc(rows * cols, sizeof(double));
-    assert(z_buffer != NULL);
-
-    RenderCtx render_ctx;
-    render_ctx.buffer = buffer;
-    render_ctx.z_buffer = z_buffer;
-    render_ctx.rows = rows;
-    render_ctx.cols = cols;
-    render_ctx.subpixel = 0.5;
-
-    srand(69);
-    draw_object(verts, size, &render_ctx);
-
-    stbi_write_jpg("./fuck.jpg",rows, cols, 1, buffer, 100);
-
-    free(verts);
-    free(texcoords);
-    free(normals);
-    free(buffer);
-    free(z_buffer);
-}
+#include "renderer.h"
 
 double normalize(double val, double upper, double lower)
 {
@@ -158,7 +90,6 @@ void mesh_centroid(vec3 dst, vec3 *verts, size_t n_verts)
     dst[2] = sum_z / (double)n_verts;
 }
 
-//https://stackoverflow.com/questions/1560492/how-to-tell-whether-a-point-is-to-the-right-or-left-side-of-a-line
 int orient2d(vec2 a, vec2 b, vec2 c)
 {
     return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0]);
@@ -180,7 +111,7 @@ void triangle_bbox(vec3 triangle[3], double *max_x, double *max_y, double *min_x
 // find the bbox of a triangle, loop over each pixel in bbox,
 //    see if it's in the triangle by checking for negative bary coords
 // TODO: this only works for square dimensions, and switching the VLA dimensions fixes it??
-void draw_triangle(vec3 triangle[3], uint8_t fill, RenderCtx *ctx)
+void draw_triangle(vec3 triangle[3], uint8_t fill[3], RenderCtx *ctx)
 {
     double *a = triangle[0];
     double *b = triangle[1];
@@ -228,7 +159,9 @@ void draw_triangle(vec3 triangle[3], uint8_t fill, RenderCtx *ctx)
                 if (ctx->z_buffer[idx] < sp[2])
                 {
                     ctx->z_buffer[idx] = sp[2];
-                    ctx->buffer[idx] = fill;
+                    ctx->buffer[idx][0] = fill[0];
+                    ctx->buffer[idx][1] = fill[1];
+                    ctx->buffer[idx][2] = fill[2];
                 }
             }
         }
@@ -285,9 +218,11 @@ void ortho_projection(vec2 dst, vec3 pt, vec2 scale, vec2 offset)
 
 void draw_object(double (*verts)[3], size_t n_verts, RenderCtx *ctx)
 {
+    static double t = 0;
+
     vec3 centroid;
     mesh_centroid(centroid, verts, n_verts);
-    vec3 camera_pos = {0, 0, 0};
+    vec3 camera_pos = {0, t+=0.001, 0};
     vec3 up = {0, 1, 0};
     mat4x4 camera_space_transform;
     camera_transform(camera_space_transform, camera_pos, verts[0], up);
@@ -296,6 +231,9 @@ void draw_object(double (*verts)[3], size_t n_verts, RenderCtx *ctx)
     vec3 max_world_pt;
     mesh_bounds(verts, n_verts, min_world_pt, max_world_pt);
 
+    // removing leftover values from previous frame
+    memset(ctx->buffer, 0, ctx->rows * ctx->cols * 3 * sizeof(uint8_t));
+    memset(ctx->z_buffer, 0, ctx->rows * ctx->cols * sizeof(double));
 
     // looping through 3 verts at a time
     for (int i = 0; i < n_verts; i+=3)
@@ -333,22 +271,45 @@ void draw_object(double (*verts)[3], size_t n_verts, RenderCtx *ctx)
         surface_normal(normal, &verts[i]);
         vec3_norm(normal, normal);
 
-        draw_triangle(screen_triangle, rand() % 255, ctx);
+        uint8_t pixel[3] = {rand() % 255, rand() % 255, rand() % 255};
+        draw_triangle(screen_triangle, pixel, ctx);
     }
 }
 
-void dump_array(const char *tag, int rows, int cols, uint8_t array[rows][cols])
+RenderCtx init_renderer()
 {
-    printf("%s (%dx%d):\n", tag, rows, cols);
-    for (int i = 0; i < rows; i++)
-    {
-        for (int j = 0; j < cols; j++)
-        {
-            printf("%3d", array[i][j]);
-        }
-        putchar('\n');
-    }
+    RenderCtx ctx;
+    ObjMesh *mesh = malloc(sizeof(ObjMesh));
+
+    ctx.mesh = mesh;
+
+    ctx.rows = 2048;
+    ctx.cols = 2048;
+    ctx.subpixel = 0.5;
+
+    ctx.buffer = calloc(ctx.rows * ctx.cols * 3, sizeof(uint8_t));
+    assert(ctx.buffer != NULL);
+
+    ctx.z_buffer = calloc(ctx.rows * ctx.cols, sizeof(double));
+    assert(ctx.z_buffer != NULL);
+
+    // malloc'd by parse_obj
+    parse_obj("models/teapot_maya_big.obj",
+            &mesh->size, &mesh->verts, &mesh->texcoords, &mesh->normals);
+
+    // parse_obj should return all faces as tris, but let's make sure
+    assert(mesh->size % 3 == 0);
+
+    return ctx;
 }
 
-
+void destroy_renderer(RenderCtx *ctx)
+{
+    free(ctx->mesh->verts);
+    free(ctx->mesh->texcoords);
+    free(ctx->mesh->normals);
+    free(ctx->mesh);
+    free(ctx->z_buffer);
+    free(ctx->buffer);
+}
 

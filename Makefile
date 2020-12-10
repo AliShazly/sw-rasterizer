@@ -1,7 +1,7 @@
 CC       = clang
 CFLAGS   = -Wall -g
-LDFLAGS  = -lm
-OBJFILES = renderer.o obj_parser.o list.o
+LDFLAGS  = -lm -lGL -lGLU -lglut
+OBJFILES = display.o renderer.o obj_parser.o list.o
 TARGET   = renderer
 
 all: $(TARGET)
@@ -9,9 +9,8 @@ all: $(TARGET)
 renderer: $(OBJFILES)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o renderer $(OBJFILES)
 
-parser: obj_parser.o list.o
-	$(CC) $(CFLAGS) $(LDFLAGS) -o parser obj_parser.o list.o
-
+display.o: display.c renderer.c obj_parser.c list.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -c display.c renderer.c obj_parser.c list.c
 
 renderer.o: renderer.c obj_parser.c list.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -c renderer.c obj_parser.c list.c
