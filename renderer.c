@@ -16,6 +16,15 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "lib/stb_image_write.h"
 
+typedef struct
+{
+    int rows;
+    int cols;
+    uint8_t *buffer;
+    uint8_t *z_buffer;
+
+
+}RenderCtx;
 
 double normalize(double val, double upper, double lower);
 void mesh_bounds(vec3 *verts, size_t n_verts, vec3 out_min, vec3 out_max);
