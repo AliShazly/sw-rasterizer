@@ -17,10 +17,25 @@
 
 #define ROWS 512
 #define COLS 512
+#define UP_VECTOR {0,1,0}
+
+int clamp(int val, int min, int max)
+{
+    if (val > max)
+        return max;
+    else if (val < min)
+        return min;
+    return val;
+}
 
 double normalize(double val, double upper, double lower)
 {
     return (val - lower) / (upper - lower);
+}
+
+double gamma_correct(double val, double g)
+{
+    return 255 * pow((val / 255), g);
 }
 
 // find bounding box of verts and equalizes the width / height
@@ -104,7 +119,6 @@ void triangle_bbox(vec3 triangle[3], double *max_x, double *max_y, double *min_x
     double *a = triangle[0];
     double *b = triangle[1];
     double *c = triangle[2];
-
     *max_x = fmax(a[0], fmax(b[0], c[0]));
     *max_y = fmax(a[1], fmax(b[1], c[1]));
     *min_x = fmin(a[0], fmin(b[0], c[0]));
@@ -144,6 +158,8 @@ void draw_triangle(vec3 triangle[3], uint8_t fill[3], RenderCtx *ctx)
             int w1 = orient2d(c, a, sp);
             int w2 = orient2d(a, b, sp);
 
+
+            /* if ((w0 >= 0 && w1 == 1) || w2 == 1) // wireframe */
             // if point is inside or on all edges
             if (w0 >= 0 && w1 >= 0 && w2 >= 0)
             {
@@ -184,24 +200,24 @@ void surface_normal(vec3 dst, vec3 *triangle)
     vec3_mul_cross(dst, v, w);
 }
 
-// https://www.3dgep.com/understanding-the-view-matrix/#Transformations
-void camera_transform(mat4x4 dst, vec3 camera_pos, vec3 target, vec3 up)
+// look-at
+void camera_transform(vec3 camera_pos, vec3 target, vec3 up, mat4x4 dst, vec3 out_z)
 {
-    vec3 z_axis; // camera forward vector
-    vec3_sub(z_axis, camera_pos, target);
-    vec3_norm(z_axis, z_axis);
+    // camera forward vector
+    vec3_sub(out_z, camera_pos, target);
+    vec3_norm(out_z, out_z);
 
     vec3 x_axis; // camera right vector
-    vec3_mul_cross(x_axis, up, z_axis);
+    vec3_mul_cross(x_axis, up, out_z);
     vec3_norm(x_axis, x_axis);
 
     vec3 y_axis; // camera up vector
-    vec3_mul_cross(y_axis, z_axis, x_axis);
+    vec3_mul_cross(y_axis, out_z, x_axis);
 
     mat4x4 orientation = {
-        {x_axis[0], y_axis[0], z_axis[0], 0},
-        {x_axis[1], y_axis[1], z_axis[1], 0},
-        {x_axis[2], y_axis[2], z_axis[2], 0},
+        {x_axis[0], y_axis[0], out_z[0], 0},
+        {x_axis[1], y_axis[1], out_z[1], 0},
+        {x_axis[2], y_axis[2], out_z[2], 0},
         {0,         0,         0,         1}
     };
 
@@ -214,6 +230,8 @@ void camera_transform(mat4x4 dst, vec3 camera_pos, vec3 target, vec3 up)
     mat4x4_mul(dst, orientation, translation);
 }
 
+/* void rotate_points(pts, origin, x, y, z); */
+
 // https://en.wikipedia.org/wiki/3D_projection#Orthographic_projection
 void ortho_projection(vec2 dst, vec3 pt, vec2 scale, vec2 offset)
 {
@@ -225,11 +243,14 @@ void ortho_projection(vec2 dst, vec3 pt, vec2 scale, vec2 offset)
 void draw_object(double (*verts)[3], size_t n_verts, RenderCtx *ctx)
 {
     vec3 centroid;
-    mesh_centroid(centroid, verts, n_verts);
-    vec3 camera_pos = {0, 0, 0};
-    vec3 up = {0, 1, 0};
+    vec3 camera_z;
     mat4x4 camera_space_transform;
-    camera_transform(camera_space_transform, camera_pos, verts[0], up);
+
+    vec3 camera_pos = {0, 0, 0};
+    vec3 up = UP_VECTOR;
+
+    mesh_centroid(centroid, verts, n_verts);
+    camera_transform(camera_pos, centroid, up, camera_space_transform, camera_z);
 
     vec3 min_world_pt;
     vec3 max_world_pt;
@@ -275,9 +296,18 @@ void draw_object(double (*verts)[3], size_t n_verts, RenderCtx *ctx)
         surface_normal(normal, &verts[i]);
         vec3_norm(normal, normal);
 
-        /* uint8_t pixel[3] = {rand() % 255, rand() % 255, rand() % 255}; */
-        uint8_t pixel[3] = {255, 255, 255};
-        draw_triangle(screen_triangle, pixel, ctx);
+        // light direction
+        vec3 neg_cam = {-camera_z[0],-camera_z[1],-camera_z[2]};
+        double intensity = vec3_mul_inner(normal, neg_cam);
+
+        uint8_t p = gamma_correct(clamp(intensity * 255, 0, 255), 2.2);
+        uint8_t pixel[3] = {p,p,p};
+
+        // not drawing faces looking away from camera
+        if (intensity > 0)
+        {
+            draw_triangle(screen_triangle, pixel, ctx);
+        }
     }
 }
 
