@@ -21,8 +21,8 @@ typedef struct
     int rows;
     int cols;
     uint8_t *buffer;
-    uint8_t *z_buffer;
-
+    double *z_buffer;
+    double subpixel;
 
 }RenderCtx;
 
@@ -32,14 +32,13 @@ void mesh_centroid(vec3 dst, vec3 *verts, size_t n_verts);
 
 int orient2d(vec2 a, vec2 b, vec2 c);
 void triangle_bbox(vec3 triangle[3], double *max_x, double *max_y, double *min_x, double *min_y);
-void draw_triangle(vec3 triangle[3], int rows, int cols, uint8_t buffer[rows][cols],
-        double z_buffer[rows][cols], double subpixel, uint8_t fill);
+void draw_triangle(vec3 triangle[3], uint8_t fill, RenderCtx *ctx);
 
 void surface_normal(vec3 dst, vec3 *triangle);
 void camera_transform(mat4x4 dst, vec3 camera_pos, vec3 target, vec3 up);
 
 void ortho_projection(vec2 dst, vec3 pt, vec2 scale, vec2 offset);
-void draw_object(double (*verts)[3], size_t n_verts, int rows, int cols, uint8_t buffer[rows][cols]);
+void draw_object(double (*verts)[3], size_t n_verts, RenderCtx *ctx);
 
 void dump_array(const char *tag, int rows, int cols, uint8_t array[rows][cols]);
 
@@ -58,11 +57,22 @@ int main(void)
 
     int rows = 1024;
     int cols = 1024;
-    uint8_t (*buffer)[cols] = calloc(rows * cols, sizeof(uint8_t));
+
+    uint8_t *buffer = calloc(rows * cols, sizeof(uint8_t));
     assert(buffer != NULL);
 
+    double *z_buffer = calloc(rows * cols, sizeof(double));
+    assert(z_buffer != NULL);
+
+    RenderCtx render_ctx;
+    render_ctx.buffer = buffer;
+    render_ctx.z_buffer = z_buffer;
+    render_ctx.rows = rows;
+    render_ctx.cols = cols;
+    render_ctx.subpixel = 0.5;
+
     srand(69);
-    draw_object(verts, size, rows, cols, buffer);
+    draw_object(verts, size, &render_ctx);
 
     stbi_write_jpg("./fuck.jpg",rows, cols, 1, buffer, 100);
 
@@ -70,6 +80,7 @@ int main(void)
     free(texcoords);
     free(normals);
     free(buffer);
+    free(z_buffer);
 }
 
 double normalize(double val, double upper, double lower)
@@ -169,8 +180,7 @@ void triangle_bbox(vec3 triangle[3], double *max_x, double *max_y, double *min_x
 // find the bbox of a triangle, loop over each pixel in bbox,
 //    see if it's in the triangle by checking for negative bary coords
 // TODO: this only works for square dimensions, and switching the VLA dimensions fixes it??
-void draw_triangle(vec3 triangle[3], int rows, int cols, uint8_t buffer[rows][cols],
-        double z_buffer[rows][cols], double subpixel, uint8_t fill)
+void draw_triangle(vec3 triangle[3], uint8_t fill, RenderCtx *ctx)
 {
     double *a = triangle[0];
     double *b = triangle[1];
@@ -182,12 +192,12 @@ void draw_triangle(vec3 triangle[3], int rows, int cols, uint8_t buffer[rows][co
     vec3 sp; // screen space point
     // looping through every point in the bounding box with subpixel accuracy to make sure triangles line up
     // TODO: would only need to loop once per pixel (2x speedup) if this used a 'fill convention'
-    for (sp[0] = min_x; sp[0] <= max_x; sp[0] += subpixel)
+    for (sp[0] = min_x; sp[0] <= max_x; sp[0] += ctx->subpixel)
     {
-        for (sp[1] = min_y; sp[1] <= max_y; sp[1] += subpixel)
+        for (sp[1] = min_y; sp[1] <= max_y; sp[1] += ctx->subpixel)
         {
             // if bbox point is out of screen bounds
-            if (sp[0] >= cols - 1 || sp[1] >= rows - 1 || sp[0] < 0 || sp[1] < 0)
+            if (sp[0] >= ctx->cols - 1 || sp[1] >= ctx->rows - 1 || sp[0] < 0 || sp[1] < 0)
             {
                 continue;
             }
@@ -209,13 +219,16 @@ void draw_triangle(vec3 triangle[3], int rows, int cols, uint8_t buffer[rows][co
                 sp[2] += c[2] * w2;
 
                 // flipping vertically
-                int row = (rows - 1) - ceil(sp[1]);
+                int row = (ctx->rows - 1) - ceil(sp[1]);
                 int col = ceil(sp[0]);
 
-                if (z_buffer[row][col] < sp[2])
+                // 2D index (row,col) to a 1D index
+                int idx = row * ctx->cols + col;
+
+                if (ctx->z_buffer[idx] < sp[2])
                 {
-                    z_buffer[row][col] = sp[2];
-                    buffer[row][col] = fill;
+                    ctx->z_buffer[idx] = sp[2];
+                    ctx->buffer[idx] = fill;
                 }
             }
         }
@@ -270,11 +283,8 @@ void ortho_projection(vec2 dst, vec3 pt, vec2 scale, vec2 offset)
     dst[1] = scale[1] * pt[1] + offset[1];
 }
 
-void draw_object(double (*verts)[3], size_t n_verts, int rows, int cols, uint8_t buffer[rows][cols])
+void draw_object(double (*verts)[3], size_t n_verts, RenderCtx *ctx)
 {
-    double (*z_buffer)[cols] = calloc(rows * cols, sizeof(double));
-    assert(z_buffer != NULL);
-
     vec3 centroid;
     mesh_centroid(centroid, verts, n_verts);
     vec3 camera_pos = {0, 0, 0};
@@ -305,7 +315,7 @@ void draw_object(double (*verts)[3], size_t n_verts, int rows, int cols, uint8_t
             mat4x4_mul_vec4(camera_space_pt, camera_space_transform, norm_world_pt);
 
             vec2 clip_space_pt;
-            vec2 scale = {1 * rows, 1 * cols};
+            vec2 scale = {1 * ctx->rows, 1 * ctx->cols};
             vec2 offset = {0,0};
             ortho_projection(clip_space_pt, camera_space_pt,scale,offset);
 
@@ -323,9 +333,8 @@ void draw_object(double (*verts)[3], size_t n_verts, int rows, int cols, uint8_t
         surface_normal(normal, &verts[i]);
         vec3_norm(normal, normal);
 
-        draw_triangle(screen_triangle, rows, cols, buffer, z_buffer, 0.5, rand() % 255);
+        draw_triangle(screen_triangle, rand() % 255, ctx);
     }
-    free(z_buffer);
 }
 
 void dump_array(const char *tag, int rows, int cols, uint8_t array[rows][cols])

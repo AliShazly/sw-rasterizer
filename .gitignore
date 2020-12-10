@@ -2,3 +2,4 @@ models/
 *.jpg
 *.png
 *.o
+vgcore*
