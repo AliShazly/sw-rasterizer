@@ -15,6 +15,9 @@
 #include "obj_parser.h"
 #include "renderer.h"
 
+#define ROWS 512
+#define COLS 512
+
 double normalize(double val, double upper, double lower)
 {
     return (val - lower) / (upper - lower);
@@ -110,7 +113,6 @@ void triangle_bbox(vec3 triangle[3], double *max_x, double *max_y, double *min_x
 
 // find the bbox of a triangle, loop over each pixel in bbox,
 //    see if it's in the triangle by checking for negative bary coords
-// TODO: this only works for square dimensions, and switching the VLA dimensions fixes it??
 void draw_triangle(vec3 triangle[3], uint8_t fill[3], RenderCtx *ctx)
 {
     double *a = triangle[0];
@@ -120,13 +122,17 @@ void draw_triangle(vec3 triangle[3], uint8_t fill[3], RenderCtx *ctx)
     double max_x, max_y, min_x, min_y;
     triangle_bbox(triangle, &max_x, &max_y, &min_x, &min_y);
 
+    max_x = ceil(max_x);
+    max_y = ceil(max_y);
+    min_y = floor(min_y);
+    min_x = floor(min_x);
+
     vec3 sp; // screen space point
-    // looping through every point in the bounding box with subpixel accuracy to make sure triangles line up
-    // TODO: would only need to loop once per pixel (2x speedup) if this used a 'fill convention'
-    for (sp[0] = min_x; sp[0] <= max_x; sp[0] += ctx->subpixel)
+    for (sp[0] = min_x; sp[0] <= max_x; sp[0] += 1)
     {
-        for (sp[1] = min_y; sp[1] <= max_y; sp[1] += ctx->subpixel)
+        for (sp[1] = min_y; sp[1] <= max_y; sp[1] += 1)
         {
+            /* printf("%f %f\n",sp[0],sp[1]); */
             // if bbox point is out of screen bounds
             if (sp[0] >= ctx->cols - 1 || sp[1] >= ctx->rows - 1 || sp[0] < 0 || sp[1] < 0)
             {
@@ -218,11 +224,9 @@ void ortho_projection(vec2 dst, vec3 pt, vec2 scale, vec2 offset)
 
 void draw_object(double (*verts)[3], size_t n_verts, RenderCtx *ctx)
 {
-    static double t = 0;
-
     vec3 centroid;
     mesh_centroid(centroid, verts, n_verts);
-    vec3 camera_pos = {0, t+=0.001, 0};
+    vec3 camera_pos = {0, 0, 0};
     vec3 up = {0, 1, 0};
     mat4x4 camera_space_transform;
     camera_transform(camera_space_transform, camera_pos, verts[0], up);
@@ -271,7 +275,8 @@ void draw_object(double (*verts)[3], size_t n_verts, RenderCtx *ctx)
         surface_normal(normal, &verts[i]);
         vec3_norm(normal, normal);
 
-        uint8_t pixel[3] = {rand() % 255, rand() % 255, rand() % 255};
+        /* uint8_t pixel[3] = {rand() % 255, rand() % 255, rand() % 255}; */
+        uint8_t pixel[3] = {255, 255, 255};
         draw_triangle(screen_triangle, pixel, ctx);
     }
 }
@@ -280,12 +285,12 @@ RenderCtx init_renderer()
 {
     RenderCtx ctx;
     ObjMesh *mesh = malloc(sizeof(ObjMesh));
+    assert(mesh != NULL);
 
     ctx.mesh = mesh;
 
-    ctx.rows = 2048;
-    ctx.cols = 2048;
-    ctx.subpixel = 0.5;
+    ctx.rows = ROWS;
+    ctx.cols = COLS;
 
     ctx.buffer = calloc(ctx.rows * ctx.cols * 3, sizeof(uint8_t));
     assert(ctx.buffer != NULL);

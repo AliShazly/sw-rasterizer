@@ -18,7 +18,6 @@ typedef struct
 {
     int rows;
     int cols;
-    double subpixel;
     uint8_t (*buffer)[3];
     double *z_buffer;
     ObjMesh *mesh;
