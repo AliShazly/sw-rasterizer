@@ -9,6 +9,7 @@
 typedef struct
 {
     size_t size;
+    vec3 centroid;
     double (*verts)[3];
     double (*texcoords)[2];
     double (*normals)[3];
@@ -18,18 +19,27 @@ typedef struct
 {
     int rows;
     int cols;
+    vec3 camera_pos;
+    vec3 camera_z;
+    mat4x4 cam_space_transform;
     uint8_t (*buffer)[3];
     double *z_buffer;
+    uint8_t *new_z;
     ObjMesh *mesh;
 
 }RenderCtx;
 
+
+double inc(double i, double lim);
 int clamp(int val, int min, int max);
 double normalize(double val, double upper, double lower);
+void normalize_vec3(vec3 dst, vec3 val, double upper, double lower);
 double gamma_correct(double val, double g);
+double distance(vec3 a, vec3 b);
 
 void mesh_bounds(vec3 *verts, size_t n_verts, vec3 out_min, vec3 out_max);
 void mesh_centroid(vec3 dst, vec3 *verts, size_t n_verts);
+void normalize_coords(vec3 *out_arr, vec3 *verts, size_t n_verts);
 
 int orient2d(vec2 a, vec2 b, vec2 c);
 void triangle_bbox(vec3 triangle[3], double *max_x, double *max_y, double *min_x, double *min_y);
