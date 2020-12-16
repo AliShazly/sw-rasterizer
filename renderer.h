@@ -19,12 +19,14 @@ typedef struct
 {
     int rows;
     int cols;
+    int grid_rows;
+    int grid_cols;
     vec3 camera_pos;
     vec3 camera_z;
-    mat4x4 cam_space_transform;
+    mat4x4 cam_transform;
     uint8_t (*buffer)[3];
     double *z_buffer;
-    uint8_t *new_z;
+    vec2 **grid_points;
     ObjMesh *mesh;
 
 }RenderCtx;
@@ -33,9 +35,10 @@ typedef struct
 double inc(double i, double lim);
 int clamp(int val, int min, int max);
 double normalize(double val, double upper, double lower);
-void normalize_vec3(vec3 dst, vec3 val, double upper, double lower);
 double gamma_correct(double val, double g);
 double distance(vec3 a, vec3 b);
+void line_midpoint(vec2 dst, vec2 a, vec2 b);
+void subdivide_line(vec2 *dst, size_t out_len, vec2 line[2], int n_subdivs);
 
 void mesh_bounds(vec3 *verts, size_t n_verts, vec3 out_min, vec3 out_max);
 void mesh_centroid(vec3 dst, vec3 *verts, size_t n_verts);
@@ -48,7 +51,12 @@ void draw_triangle(vec3 triangle[3], uint8_t fill[3], RenderCtx *ctx);
 void surface_normal(vec3 dst, vec3 *triangle);
 void camera_transform(vec3 camera_pos, vec3 target, vec3 up, mat4x4 dst, vec3 out_z);
 void ortho_projection(vec2 dst, vec3 pt, vec2 scale, vec2 offset);
-void draw_object(double (*verts)[3], size_t n_verts, RenderCtx *ctx);
+void world_to_screen(vec3 dst, mat4x4 cam_space_transform, vec4 world_pt, int rows, int cols);
+void clear_buffers(RenderCtx *ctx);
+void draw_object(RenderCtx *ctx);
+void draw_object_wireframe(RenderCtx *ctx);
+vec2 **compute_grid(double size, int n_subdivs, int *out_rows, int *out_cols);
+void draw_grid(RenderCtx *ctx);
 
 RenderCtx init_renderer();
 void destroy_renderer(RenderCtx *ctx);

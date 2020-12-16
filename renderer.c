@@ -7,18 +7,20 @@
 #include <math.h>
 #include <string.h>
 #include <unistd.h>
+#include <float.h>
 
 // https://github.com/datenwolf/linmath.h
 //   i made all the vec# types doubles, added string.h
 #include "lib/linmath_d.h"
 
 #include "obj_parser.h"
+#include "wu_line.h"
 #include "renderer.h"
 
-#define ROWS 512
-#define COLS 512
+#define ROWS 1024
+#define COLS 1024
+#define BACKGROUND 50
 #define UP_VECTOR {0,1,0}
-#define FAR_CLIP 10000
 
 void print_vec3(vec3 v)
 {
@@ -53,7 +55,7 @@ double normalize(double val, double upper, double lower)
 
 double gamma_correct(double val, double g)
 {
-    return 255 * pow((val / 255), g);
+    return 255. * pow((val / 255), g);
 }
 
 double distance(vec3 a, vec3 b)
@@ -61,46 +63,68 @@ double distance(vec3 a, vec3 b)
     return sqrt(pow(b[0] - a[0], 2) + pow(b[1] - a[1], 2) + pow(b[2] - a[2], 2));
 }
 
+void line_midpoint(vec2 dst, vec2 a, vec2 b)
+{
+    double abs_mid_x = fabs(a[0] - b[0]) / 2.;
+    double abs_mid_y = fabs(a[1] - b[1]) / 2.;
+    dst[0] = fmin(a[0], b[0]) + abs_mid_x;
+    dst[1] = fmin(a[1], b[1]) + abs_mid_y;
+}
+
+// Only fills the middle of the line, leaves the ends empty
+void subdivide_line(vec2 *dst, size_t out_len, vec2 line[2], int n_subdivs)
+{
+    if (n_subdivs > 0)
+    {
+        size_t mid_idx = out_len / 2;
+
+        vec2 mid;
+        line_midpoint(mid, line[0], line[1]);
+        memcpy(dst[mid_idx], mid, sizeof(vec2));
+
+        vec2 subline_1[2];
+        vec2 subline_2[2];
+        memcpy(subline_1[0], line[0], sizeof(vec2));
+        memcpy(subline_1[1], mid, sizeof(vec2));
+        memcpy(subline_2[0], mid, sizeof(vec2));
+        memcpy(subline_2[1], line[1], sizeof(vec2));
+
+        size_t new_out_len = pow(2, n_subdivs - 1) + 1;
+        subdivide_line(dst, new_out_len, subline_1, n_subdivs - 1);
+
+        // assigning to the 2nd half of the output array
+        subdivide_line(dst + mid_idx, new_out_len, subline_2, n_subdivs - 1);
+    }
+}
+
 void mesh_bounds(vec3 *verts, size_t n_verts, vec3 out_min, vec3 out_max)
 {
     double min_x, min_y, min_z;
     double max_x, max_y, max_z;
-    min_x = min_y = min_z = INT_MAX;
-    max_x = max_y = max_z = INT_MIN;
+    min_x = min_y = min_z = DBL_MAX;
+    max_x = max_y = max_z = -DBL_MAX;
 
     for (int i = 0; i < n_verts; i++)
     {
         if (verts[i][0] < min_x)
-        {
             min_x = verts[i][0];
-        }
         else if (verts[i][0] > max_x)
-        {
             max_x = verts[i][0];
-        }
 
         if (verts[i][1] < min_y)
-        {
             min_y = verts[i][1];
-        }
         else if (verts[i][1] > max_y)
-        {
             max_y = verts[i][1];
-        }
 
         if (verts[i][2] < min_z)
-        {
             min_z = verts[i][2];
-        }
         else if (verts[i][2] > max_z)
-        {
             max_z = verts[i][2];
-        }
     }
 
     // everything should have a value
-    assert(min_x != INT_MAX && min_y != INT_MAX && min_z != INT_MAX);
-    assert(max_x != INT_MIN && max_y != INT_MIN && max_z != INT_MIN);
+    assert(min_x != DBL_MAX && min_y != DBL_MAX && min_z != DBL_MAX);
+    assert(max_x != -DBL_MAX && max_y != -DBL_MAX && max_z != -DBL_MAX);
 
     vec3 mins = {min_x, min_y, min_z};
     vec3 maxs = {max_x, max_y, max_z};
@@ -224,6 +248,7 @@ void draw_triangle(vec3 triangle[3], uint8_t fill[3], RenderCtx *ctx)
     }
 }
 
+
 // computes surface normal of triangle
 void surface_normal(vec3 dst, vec3 *triangle)
 {
@@ -237,8 +262,11 @@ void surface_normal(vec3 dst, vec3 *triangle)
 // look-at
 void camera_transform(vec3 camera_pos, vec3 target, vec3 up, mat4x4 dst, vec3 out_z)
 {
+    // keeping target point at y=0
+    /* vec3 t = {target[0], 0, target[1]}; */
+
     // camera forward vector
-    vec3_sub(out_z, camera_pos, target);
+    vec3_sub(out_z, target, camera_pos);
     vec3_norm(out_z, out_z);
 
     vec3 x_axis; // camera right vector
@@ -254,7 +282,7 @@ void camera_transform(vec3 camera_pos, vec3 target, vec3 up, mat4x4 dst, vec3 ou
         {x_axis[0], y_axis[0], out_z[0], 0},
         {x_axis[1], y_axis[1], out_z[1], 0},
         {x_axis[2], y_axis[2], out_z[2], 0},
-        {0,         0,         0,         1}
+        {0,         0,         0,        1}
     };
 
     mat4x4 translation;
@@ -295,19 +323,43 @@ void ortho_projection(vec2 dst, vec3 pt, vec2 scale, vec2 offset)
     dst[1] = scale[1] * pt[1] + offset[1];
 }
 
-void draw_object(double (*verts)[3], size_t n_verts, RenderCtx *ctx)
+void world_to_screen(vec3 dst, mat4x4 cam_space_transform, vec4 world_pt, int rows, int cols)
 {
-    // removing leftover values from previous frame
-    memset(ctx->buffer, 50, ctx->rows * ctx->cols * 3 * sizeof(uint8_t));
+    // 3D point in the camera's coordinate space
+    vec4 camera_space_pt = {0};
+    mat4x4_mul_vec4(camera_space_pt, cam_space_transform, world_pt);
+
+    // Camera point projected & scaled to screen coordinates
+    vec2 clip_space_pt;
+    vec2 scale = {0.5 * cols, 0.5 * rows};
+    vec2 offset = {cols/2., rows/2.};
+    ortho_projection(clip_space_pt, camera_space_pt, scale, offset);
+
+    // vec2, with the 3rd position used for the Z buffer
+    vec3 screen_space_pt = {
+        clip_space_pt[0],
+        clip_space_pt[1],
+        camera_space_pt[2]
+    };
+
+    memcpy(dst, screen_space_pt, sizeof(vec3));
+}
+
+void clear_buffers(RenderCtx *ctx)
+{
+    memset(ctx->buffer, BACKGROUND, ctx->rows * ctx->cols * 3 * sizeof(uint8_t));
     for (int i = 0; i < ctx->rows * ctx->cols; i++)
     {
-        ctx->z_buffer[i] = -FAR_CLIP;
+        ctx->z_buffer[i] = -DBL_MAX;
     }
+}
 
-    double time = inc(0.01, 360);
+void draw_object(RenderCtx *ctx)
+{
+    double time = inc(0.01, 1000);
 
     // looping through 3 verts at a time
-    for (int i = 0; i < n_verts; i+=3)
+    for (int i = 0; i < ctx->mesh->size; i+=3)
     {
         vec3 screen_triangle[3];
         vec3 world_triangle[3];
@@ -316,25 +368,10 @@ void draw_object(double (*verts)[3], size_t n_verts, RenderCtx *ctx)
             vec4 rotated_pt={0, 0, 0, 1};
             vec3 norm_rot_axis = {0, 1, 0};
 
-            rotate_point(rotated_pt, norm_rot_axis, verts[i + j], time);
+            rotate_point(rotated_pt, norm_rot_axis, ctx->mesh->verts[i + j], time);
 
-            // 3D point in the camera's coordinate space
-            vec4 camera_space_pt = {0};
-            mat4x4_mul_vec4(camera_space_pt, ctx->cam_space_transform, rotated_pt);
+            world_to_screen(screen_triangle[j], ctx->cam_transform, rotated_pt, ctx->rows, ctx->cols);
 
-            vec2 clip_space_pt;
-            vec2 scale = {0.3 * ctx->cols, 0.3 * ctx->rows};
-            vec2 offset = {ctx->cols/2., ctx->rows/2.};
-            ortho_projection(clip_space_pt, camera_space_pt, scale, offset);
-
-            // vec2, with the 3rd position used for the Z buffer
-            vec3 screen_space_pt = {
-                clip_space_pt[0],
-                clip_space_pt[1],
-                camera_space_pt[2]
-            };
-
-            memcpy(screen_triangle[j], screen_space_pt, sizeof(vec3));
             memcpy(world_triangle[j], rotated_pt, sizeof(vec4));
         }
 
@@ -359,6 +396,91 @@ void draw_object(double (*verts)[3], size_t n_verts, RenderCtx *ctx)
     }
 }
 
+void draw_object_wireframe(RenderCtx *ctx)
+{
+    for (int i = 0; i < ctx->mesh->size; i += 3)
+    {
+        vec3 screen_triangle[3];
+        for (int j = 0; j < 3; j++)
+        {
+            vec4 world_pt = {0, 0, 0, 1};
+            world_pt[0] = ctx->mesh->verts[i + j][0];
+            world_pt[1] = ctx->mesh->verts[i + j][2];
+            world_pt[2] = ctx->mesh->verts[i + j][1];
+            world_to_screen(screen_triangle[j], ctx->cam_transform, world_pt, ctx->rows, ctx->cols);
+        }
+
+        uint8_t color[3] = {255, 209, 220};
+        draw_line(screen_triangle[0][0], screen_triangle[0][1], screen_triangle[1][0], screen_triangle[1][1],
+                ctx->rows, ctx->cols, ctx->buffer, color);
+        draw_line(screen_triangle[1][0], screen_triangle[1][1], screen_triangle[2][0], screen_triangle[2][1],
+                ctx->rows, ctx->cols, ctx->buffer, color);
+        draw_line(screen_triangle[2][0], screen_triangle[2][1], screen_triangle[0][0], screen_triangle[0][1],
+                ctx->rows, ctx->cols, ctx->buffer, color);
+    }
+}
+
+// must free retval
+vec2 **compute_grid(double size, int n_subdivs, int *out_rows, int *out_cols)
+{
+    const int n_lines = 4;
+
+    vec2 lines[n_lines][2] = {
+        {{-size,  size}, {size,   size}}, // set 1
+        {{size,   size}, {size,  -size}}, // set 2
+        {{-size, -size}, {size,  -size}}, // set 1
+        {{-size,  size}, {-size, -size}}  // set 2
+    };
+
+
+    size_t subd_line_len = pow(2, n_subdivs) + 1;
+    vec2 (*out_subd_lines)[subd_line_len] = malloc(sizeof(vec2) * subd_line_len * n_lines);
+    assert(out_subd_lines != NULL);
+
+    for (int i = 0; i < n_lines; i++)
+    {
+        // filling the ends of the line array with the parent line values
+        memcpy(out_subd_lines[i][0                ], lines[i][0], sizeof(vec2));
+        memcpy(out_subd_lines[i][subd_line_len - 1], lines[i][1], sizeof(vec2));
+
+        subdivide_line(out_subd_lines[i], subd_line_len, lines[i], n_subdivs);
+    }
+
+    *out_rows = n_lines;
+    *out_cols = subd_line_len;
+    return (vec2**)out_subd_lines;
+}
+
+void draw_grid(RenderCtx *ctx)
+{
+    for (int i = 0; i < ctx->grid_cols; i++)
+    {
+        vec3 screen_pts[ctx->grid_rows];
+        for (int j = 0; j < ctx->grid_rows; j++)
+        {
+            vec4 world_pt = {0, 0, 0, 1};
+            // storing grid_points as a double pointer, casting back to 2D array.
+            world_pt[0] = ((vec2 (*)[ctx->grid_cols]) ctx->grid_points)[j][i][0];
+            world_pt[1] = 0;
+            world_pt[2] = ((vec2 (*)[ctx->grid_cols]) ctx->grid_points)[j][i][1];
+            world_to_screen(screen_pts[j], ctx->cam_transform, world_pt, ctx->rows, ctx->cols);
+        }
+
+        uint8_t color[3] = {BACKGROUND-20, BACKGROUND-20, BACKGROUND-20};
+        if (i == ctx->grid_cols / 2) // Middle line
+        {
+            color[0] = 227;
+            color[1] = 59;
+            color[2] = 104;
+        }
+
+        draw_line(screen_pts[0][0], screen_pts[0][1], screen_pts[2][0], screen_pts[2][1],
+                ctx->rows, ctx->cols, ctx->buffer, color);
+        draw_line(screen_pts[1][0], screen_pts[1][1], screen_pts[3][0], screen_pts[3][1],
+                ctx->rows, ctx->cols, ctx->buffer, color);
+    }
+}
+
 RenderCtx init_renderer()
 {
     RenderCtx ctx;
@@ -376,8 +498,7 @@ RenderCtx init_renderer()
     ctx.z_buffer = calloc(ctx.rows * ctx.cols, sizeof(double));
     assert(ctx.z_buffer != NULL);
 
-    // malloc'd by parse_obj
-    parse_obj("models/nowhere.obj",
+    parse_obj("models/teapot_maya.obj",
             &mesh->size, &mesh->verts, &mesh->texcoords, &mesh->normals);
     // parse_obj should return all faces as tris, but let's make sure
     assert(mesh->size % 3 == 0);
@@ -390,9 +511,12 @@ RenderCtx init_renderer()
     ctx.camera_pos[0] = 0;
     ctx.camera_pos[1] = 0;
     ctx.camera_pos[2] = 0;
+
     vec3 up = UP_VECTOR;
-    camera_transform(ctx.camera_pos, mesh->centroid, up,
-            ctx.cam_space_transform, ctx.camera_z);
+    camera_transform(ctx.camera_pos, ctx.mesh->centroid, up,
+            ctx.cam_transform, ctx.camera_z);
+
+    ctx.grid_points = compute_grid(3, 5, &ctx.grid_rows, &ctx.grid_cols);
 
     return ctx;
 }
@@ -405,5 +529,6 @@ void destroy_renderer(RenderCtx *ctx)
     free(ctx->mesh);
     free(ctx->z_buffer);
     free(ctx->buffer);
+    free(ctx->grid_points);
 }
 

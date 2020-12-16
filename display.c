@@ -1,8 +1,9 @@
 #include <stdint.h>
 #include <GL/glut.h>
-#include <time.h>
+#include <sys/time.h>
 
 #include "renderer.h"
+#include "wu_line.h"
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define CTX global_render_context_ptr
@@ -16,24 +17,18 @@ void render_2d_texture();
 
 int main(int argc, char** argv)
 {
-    srand(time(NULL));
-
     RenderCtx ctx = init_renderer();
     CTX = &ctx;
 
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DEPTH | GLUT_DOUBLE | GLUT_RGB);
-    glutInitWindowSize(1024, 1024);
-    glutCreateWindow("renderer");
+    glutInitWindowSize(CTX->cols, CTX->rows);
+    glutCreateWindow("rasterizer");
 
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glutReshapeFunc(window_reshape);
     glutDisplayFunc(render_2d_texture);
     glutKeyboardFunc(keyboard_exit);
     atexit(exit_func);
-
     glutMainLoop();
 }
 
@@ -54,25 +49,32 @@ void keyboard_exit(unsigned char c, int x, int y)
 void window_reshape(int width, int height)
 {
     int min = MIN(width, height);
-
     glViewport(0, 0, min, min);
-
-    glEnable(GL_TEXTURE_2D);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 }
-
 
 // draws a quad over the screen, writes the buffer to it as a texture
 void render_2d_texture()
 {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
     glEnable(GL_TEXTURE_2D);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-    draw_object(CTX->mesh->verts, CTX->mesh->size, CTX);
+
+    struct timeval tval_before, tval_after, tval_result;
+    gettimeofday(&tval_before, NULL);
+
+    // drawing the frame
+    clear_buffers(CTX);
+    draw_grid(CTX);
+    draw_object(CTX);
+
+    gettimeofday(&tval_after, NULL);
+    timersub(&tval_after, &tval_before, &tval_result);
+    /* printf("Time elapsed: %ld.%06ld\n", */
+    /*         (long int)tval_result.tv_sec, (long int)tval_result.tv_usec); */
+
 
     glTexImage2D(GL_TEXTURE_2D,
                0,                    // level 0
@@ -85,19 +87,15 @@ void render_2d_texture()
 
     // texcoords are arranged to fit 2D arrays
     glBegin(GL_QUADS);
-        /* glColor3f(1, 0, 0); */
         glTexCoord2f(0.0, 1.0);
         glVertex2f(-1, -1);
 
-        /* glColor3f(rand() / (double)RAND_MAX,rand() / (double)RAND_MAX, rand() / (double)RAND_MAX); */
         glTexCoord2f(1.0, 1.0);
         glVertex2f(1, -1);
 
-        /* glColor3f(rand() / (double)RAND_MAX,rand() / (double)RAND_MAX, rand() / (double)RAND_MAX); */
         glTexCoord2f(1.0, 0.0);
         glVertex2f(1, 1);
 
-        /* glColor3f(rand() / (double)RAND_MAX,rand() / (double)RAND_MAX, rand() / (double)RAND_MAX); */
         glTexCoord2f(0.0, 0.0);
         glVertex2f(-1, 1);
     glEnd();

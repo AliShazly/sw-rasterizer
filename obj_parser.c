@@ -222,6 +222,7 @@ void parse_obj(char *filename, size_t *out_size,
     // Populating output data
     *out_size = ids.used;
 
+    // TODO: only malloc what's used
     *out_verts = malloc(sizeof(double[3]) * *out_size);
     *out_texcoords = malloc(sizeof(double[2]) * *out_size);
     *out_normals = malloc(sizeof(double[3]) * *out_size);
