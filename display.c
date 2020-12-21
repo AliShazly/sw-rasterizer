@@ -10,6 +10,9 @@
 
 RenderCtx *CTX;
 
+static unsigned long long int global_frame_count = 1;
+static unsigned long long int global_usec_sum = 0;
+
 void exit_func();
 void keyboard_exit(unsigned char c, int x, int y);
 void window_reshape(int width, int height);
@@ -19,22 +22,43 @@ int main(int argc, char** argv)
 {
     RenderCtx ctx = init_renderer();
     CTX = &ctx;
+    for(int i = 0; i < 2000; i++)
+    {
+        struct timeval tval_before, tval_after, tval_result;
+        gettimeofday(&tval_before, NULL);
 
-    glutInit(&argc, argv);
-    glutInitDisplayMode(GLUT_DEPTH | GLUT_DOUBLE | GLUT_RGB);
-    glutInitWindowSize(CTX->cols, CTX->rows);
-    glutCreateWindow("rasterizer");
+        // drawing the frame
+        /* clear_buffers(CTX); */
+        /* draw_grid(CTX); */
+        /* draw_object_wireframe(CTX); */
+        draw_object_threads(CTX);
 
-    glutReshapeFunc(window_reshape);
-    glutDisplayFunc(render_2d_texture);
-    glutKeyboardFunc(keyboard_exit);
-    atexit(exit_func);
-    glutMainLoop();
+        gettimeofday(&tval_after, NULL);
+        timersub(&tval_after, &tval_before, &tval_result);
+        global_frame_count+=1;
+        global_usec_sum+=tval_result.tv_usec; // usec/1000000 for seconds
+    }
+    exit_func();
+
+
+    /* glutInit(&argc, argv); */
+    /* glutInitDisplayMode(GLUT_DEPTH | GLUT_DOUBLE | GLUT_RGB); */
+    /* glutInitWindowSize(CTX->cols, CTX->rows); */
+    /* glutCreateWindow("rasterizer"); */
+
+    /* glutReshapeFunc(window_reshape); */
+    /* glutDisplayFunc(render_2d_texture); */
+    /* glutKeyboardFunc(keyboard_exit); */
+    /* atexit(exit_func); */
+    /* glutMainLoop(); */
 }
 
 // glutMainLoop doesn't return control, need to cleanup this way
 void exit_func()
 {
+    long double usec_avg = global_usec_sum / (long double)global_frame_count;
+    double sec = (usec_avg / 1000000.);
+    printf("avg FPS: %f\n\n", 1/sec);
     destroy_renderer(CTX);
 }
 
@@ -66,14 +90,16 @@ void render_2d_texture()
     gettimeofday(&tval_before, NULL);
 
     // drawing the frame
-    clear_buffers(CTX);
-    draw_grid(CTX);
-    draw_object(CTX);
+    /* clear_buffers(CTX); */
+    /* draw_grid(CTX); */
+    /* draw_object_wireframe(CTX); */
+    draw_object_threads(CTX);
 
     gettimeofday(&tval_after, NULL);
     timersub(&tval_after, &tval_before, &tval_result);
-    /* printf("Time elapsed: %ld.%06ld\n", */
-    /*         (long int)tval_result.tv_sec, (long int)tval_result.tv_usec); */
+
+    global_frame_count+=1;
+    global_usec_sum+=tval_result.tv_usec; // usec/1000000 for seconds
 
 
     glTexImage2D(GL_TEXTURE_2D,

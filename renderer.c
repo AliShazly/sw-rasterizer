@@ -8,6 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <float.h>
+#include <pthread.h>
 
 // https://github.com/datenwolf/linmath.h
 //   i made all the vec# types doubles, added string.h
@@ -21,6 +22,7 @@
 #define COLS 1024
 #define BACKGROUND 50
 #define UP_VECTOR {0,1,0}
+#define N_THREADS 48
 
 void print_vec3(vec3 v)
 {
@@ -146,6 +148,36 @@ void mesh_centroid(vec3 dst, vec3 *verts, size_t n_verts)
     dst[2] = sum_z / (double)n_verts;
 }
 
+// computes surface normal of triangle
+void surface_normal(vec3 dst, vec3 *triangle)
+{
+    vec3 v;
+    vec3 w;
+    vec3_sub(v, triangle[2], triangle[0]);
+    vec3_sub(w, triangle[1], triangle[0]);
+    vec3_mul_cross(dst, v, w);
+}
+
+void divide_among_threads(int data_size, int n_threads, int out_sizes[n_threads])
+{
+    memset(out_sizes, 0, sizeof(int[n_threads]));
+    for (int i = 0; i < data_size; i++)
+    {
+        ++out_sizes[i % n_threads];
+    }
+}
+
+double light_triangle(vec3 camera_z, vec3 world_tri[3])
+{
+    vec3 normal;
+    surface_normal(normal, world_tri);
+    vec3_norm(normal, normal);
+
+    // light direction
+    vec3 neg_cam = {-camera_z[0],-camera_z[1],-camera_z[2]};
+    return vec3_mul_inner(normal, neg_cam);
+}
+
 void normalize_coords(vec3 *out_arr, vec3 *verts, size_t n_verts)
 {
     vec3 min_pt;
@@ -162,6 +194,7 @@ void normalize_coords(vec3 *out_arr, vec3 *verts, size_t n_verts)
     {
         for (int j = 0; j < 3; j++)
         {
+            // normalizing between -1 and 1
             out_arr[i][j] = (normalize(verts[i][j], max_max_pt, min_min_pt) - 0.5) * 2.;
         }
     }
@@ -216,7 +249,6 @@ void draw_triangle(vec3 triangle[3], uint8_t fill[3], RenderCtx *ctx)
             double w1 = orient2d(c, a, sp);
             double w2 = orient2d(a, b, sp);
 
-            /* if ((w0 >= 0 && w1 == 1) || w2 == 1) // wireframe */
             // if point is inside or on all edges
             if (w0 >= 0 && w1 >= 0 && w2 >= 0)
             {
@@ -248,16 +280,6 @@ void draw_triangle(vec3 triangle[3], uint8_t fill[3], RenderCtx *ctx)
     }
 }
 
-
-// computes surface normal of triangle
-void surface_normal(vec3 dst, vec3 *triangle)
-{
-    vec3 v;
-    vec3 w;
-    vec3_sub(v, triangle[2], triangle[0]);
-    vec3_sub(w, triangle[1], triangle[0]);
-    vec3_mul_cross(dst, v, w);
-}
 
 // look-at
 void camera_transform(vec3 camera_pos, vec3 target, vec3 up, mat4x4 dst, vec3 out_z)
@@ -318,7 +340,6 @@ void rotate_point(vec3 dst, vec3 axis, vec3 position, double theta)
 // https://en.wikipedia.org/wiki/3D_projection#Orthographic_projection
 void ortho_projection(vec2 dst, vec3 pt, vec2 scale, vec2 offset)
 {
-    // that was easy...
     dst[0] = scale[0] * pt[0] + offset[0];
     dst[1] = scale[1] * pt[1] + offset[1];
 }
@@ -331,7 +352,7 @@ void world_to_screen(vec3 dst, mat4x4 cam_space_transform, vec4 world_pt, int ro
 
     // Camera point projected & scaled to screen coordinates
     vec2 clip_space_pt;
-    vec2 scale = {0.5 * cols, 0.5 * rows};
+    vec2 scale = {0.3 * cols, 0.3 * rows};
     vec2 offset = {cols/2., rows/2.};
     ortho_projection(clip_space_pt, camera_space_pt, scale, offset);
 
@@ -348,69 +369,101 @@ void world_to_screen(vec3 dst, mat4x4 cam_space_transform, vec4 world_pt, int ro
 void clear_buffers(RenderCtx *ctx)
 {
     memset(ctx->buffer, BACKGROUND, ctx->rows * ctx->cols * 3 * sizeof(uint8_t));
-    for (int i = 0; i < ctx->rows * ctx->cols; i++)
+
+    // This is much faster than a loop, -10000 is (hopefully) casted to a large negative double
+    /* memset(ctx->z_buffer, -10000, ctx->rows * ctx->cols  * sizeof(double)); */
+
+    // TODO: this is really slow
+    for (int i = 0; i < ctx->rows * ctx->cols; ++i)
     {
         ctx->z_buffer[i] = -DBL_MAX;
     }
 }
 
-void draw_object(RenderCtx *ctx)
+void *object_thread(void *thread_args)
 {
-    double time = inc(0.01, 1000);
+    ThreadArgs *args = thread_args;
 
-    // looping through 3 verts at a time
-    for (int i = 0; i < ctx->mesh->size; i+=3)
+    for (int i = args->start_idx; i < args->end_idx + 1;  i+=3)
     {
-        vec3 screen_triangle[3];
-        vec3 world_triangle[3];
+        vec3 screen_tri[3];
+        vec3 world_tri[3];
         for (int j = 0; j < 3; j++)
         {
             vec4 rotated_pt={0, 0, 0, 1};
             vec3 norm_rot_axis = {0, 1, 0};
+            rotate_point(rotated_pt, norm_rot_axis, args->ctx->mesh->verts[i + j], args->time);
 
-            rotate_point(rotated_pt, norm_rot_axis, ctx->mesh->verts[i + j], time);
-
-            world_to_screen(screen_triangle[j], ctx->cam_transform, rotated_pt, ctx->rows, ctx->cols);
-
-            memcpy(world_triangle[j], rotated_pt, sizeof(vec4));
+            world_to_screen(screen_tri[j], args->ctx->cam_transform,
+                    rotated_pt, args->ctx->rows, args->ctx->cols);
+            memcpy(world_tri[j], rotated_pt, sizeof(vec3));
         }
 
-        vec3 normal;
-        surface_normal(normal, world_triangle);
-        vec3_norm(normal, normal);
-
-        // light direction
-        vec3 neg_cam = {-ctx->camera_z[0],-ctx->camera_z[1],-ctx->camera_z[2]};
-        double intensity = vec3_mul_inner(normal, neg_cam);
-
-        uint8_t p = gamma_correct(clamp(intensity * 255, 0, 255), 2.2);
-        uint8_t tri_color[3] = {p, p, p};
-
-        /* uint8_t pixel[3] = {rand() % 255, rand() % 255, rand() % 255}; */
+        double intensity = light_triangle(args->ctx->camera_z, world_tri);
+        uint8_t c = gamma_correct(clamp(intensity * 255, 0, 255), 2.2);
+        uint8_t tri_color[3] = {c, c, c};
 
         // not drawing faces looking away from camera (backface culling)
         if (intensity >= 0)
         {
-            draw_triangle(screen_triangle, tri_color, ctx);
+            draw_triangle(screen_tri, tri_color, args->ctx);
         }
+    }
+    return NULL;
+}
+
+void draw_object_threads(RenderCtx *ctx)
+{
+    double time = inc(0.01, 1000);
+    pthread_t threads[ctx->n_threads];
+    ThreadArgs *args[ctx->n_threads];
+
+    int offset = -1;
+    // drawing each thread's triangles
+    // TODO: this assumes all threads have an assigned size > 0
+    for (int i = 0; i < ctx->n_threads; i++)
+    {
+        args[i] = malloc(sizeof(ThreadArgs));
+        assert(args[i] != NULL);
+
+        args[i]->start_idx = offset + 1;
+        args[i]->end_idx = offset + (3 * ctx->thread_sizes[i]);
+        offset = args[i]->end_idx;
+
+        args[i]->time = time;
+
+        args[i]->ctx = ctx;
+
+        int ret = pthread_create(&threads[i], NULL, object_thread, args[i]);
+        assert(ret == 0);
+    }
+
+    // the end_idx of the last thread should be the end of the vert array
+    assert(offset == ctx->mesh->size - 1);
+
+    for (int i = 0; i < ctx->n_threads; i++)
+    {
+        pthread_join(threads[i], NULL);
+        free(args[i]);
     }
 }
 
 void draw_object_wireframe(RenderCtx *ctx)
 {
+    double time = inc(0.01, 1000);
     for (int i = 0; i < ctx->mesh->size; i += 3)
     {
         vec3 screen_triangle[3];
         for (int j = 0; j < 3; j++)
         {
-            vec4 world_pt = {0, 0, 0, 1};
-            world_pt[0] = ctx->mesh->verts[i + j][0];
-            world_pt[1] = ctx->mesh->verts[i + j][2];
-            world_pt[2] = ctx->mesh->verts[i + j][1];
-            world_to_screen(screen_triangle[j], ctx->cam_transform, world_pt, ctx->rows, ctx->cols);
+            vec4 rotated_pt={0, 0, 0, 1};
+            vec3 norm_rot_axis = {0, 1, 0};
+            rotate_point(rotated_pt, norm_rot_axis, ctx->mesh->verts[i + j], time);
+
+            world_to_screen(screen_triangle[j], ctx->cam_transform, rotated_pt, ctx->rows, ctx->cols);
         }
 
-        uint8_t color[3] = {255, 209, 220};
+        uint8_t color[3] = {180, 255, 255};
         draw_line(screen_triangle[0][0], screen_triangle[0][1], screen_triangle[1][0], screen_triangle[1][1],
                 ctx->rows, ctx->cols, ctx->buffer, color);
         draw_line(screen_triangle[1][0], screen_triangle[1][1], screen_triangle[2][0], screen_triangle[2][1],
@@ -420,7 +473,6 @@ void draw_object_wireframe(RenderCtx *ctx)
     }
 }
 
-// must free retval
 vec2 **compute_grid(double size, int n_subdivs, int *out_rows, int *out_cols)
 {
     const int n_lines = 4;
@@ -431,7 +483,6 @@ vec2 **compute_grid(double size, int n_subdivs, int *out_rows, int *out_cols)
         {{-size, -size}, {size,  -size}}, // set 1
         {{-size,  size}, {-size, -size}}  // set 2
     };
-
 
     size_t subd_line_len = pow(2, n_subdivs) + 1;
     vec2 (*out_subd_lines)[subd_line_len] = malloc(sizeof(vec2) * subd_line_len * n_lines);
@@ -448,21 +499,24 @@ vec2 **compute_grid(double size, int n_subdivs, int *out_rows, int *out_cols)
 
     *out_rows = n_lines;
     *out_cols = subd_line_len;
-    return (vec2**)out_subd_lines;
+    return (vec2**)out_subd_lines; // need to cast back to 2D array
 }
 
 void draw_grid(RenderCtx *ctx)
 {
+    // storing grid_points as a double pointer, casting back to 2D array.
+    vec2 (*grid_pts_2d)[ctx->grid_cols] = (vec2 (*)[ctx->grid_cols])ctx->grid_points;
+
     for (int i = 0; i < ctx->grid_cols; i++)
     {
         vec3 screen_pts[ctx->grid_rows];
         for (int j = 0; j < ctx->grid_rows; j++)
         {
             vec4 world_pt = {0, 0, 0, 1};
-            // storing grid_points as a double pointer, casting back to 2D array.
-            world_pt[0] = ((vec2 (*)[ctx->grid_cols]) ctx->grid_points)[j][i][0];
+
+            world_pt[0] = grid_pts_2d[j][i][0];
             world_pt[1] = 0;
-            world_pt[2] = ((vec2 (*)[ctx->grid_cols]) ctx->grid_points)[j][i][1];
+            world_pt[2] = grid_pts_2d[j][i][1];
             world_to_screen(screen_pts[j], ctx->cam_transform, world_pt, ctx->rows, ctx->cols);
         }
 
@@ -498,7 +552,7 @@ RenderCtx init_renderer()
     ctx.z_buffer = calloc(ctx.rows * ctx.cols, sizeof(double));
     assert(ctx.z_buffer != NULL);
 
-    parse_obj("models/teapot_maya.obj",
+    parse_obj("./models/teapot_maya.obj",
             &mesh->size, &mesh->verts, &mesh->texcoords, &mesh->normals);
     // parse_obj should return all faces as tris, but let's make sure
     assert(mesh->size % 3 == 0);
@@ -518,6 +572,11 @@ RenderCtx init_renderer()
 
     ctx.grid_points = compute_grid(3, 5, &ctx.grid_rows, &ctx.grid_cols);
 
+    // number of triangles per thread, need to multiply by 3 to get num points
+    ctx.n_threads = N_THREADS;
+    ctx.thread_sizes = malloc(sizeof(int) * ctx.n_threads);
+    divide_among_threads(ctx.mesh->size / 3, ctx.n_threads, ctx.thread_sizes);
+
     return ctx;
 }
 
@@ -530,5 +589,6 @@ void destroy_renderer(RenderCtx *ctx)
     free(ctx->z_buffer);
     free(ctx->buffer);
     free(ctx->grid_points);
+    free(ctx->thread_sizes);
 }
 
