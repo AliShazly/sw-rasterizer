@@ -1,9 +1,8 @@
-#include <stdint.h>
+#include "context.h"
+#include "rasterize.h"
+
 #include <GL/glut.h>
 #include <sys/time.h>
-
-#include "renderer.h"
-#include "wu_line.h"
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define CTX global_render_context_ptr
@@ -22,35 +21,17 @@ int main(int argc, char** argv)
 {
     RenderCtx ctx = init_renderer();
     CTX = &ctx;
-    for(int i = 0; i < 2000; i++)
-    {
-        struct timeval tval_before, tval_after, tval_result;
-        gettimeofday(&tval_before, NULL);
 
-        // drawing the frame
-        /* clear_buffers(CTX); */
-        /* draw_grid(CTX); */
-        /* draw_object_wireframe(CTX); */
-        draw_object_threads(CTX);
+    glutInit(&argc, argv);
+    glutInitDisplayMode(GLUT_DEPTH | GLUT_DOUBLE | GLUT_RGB);
+    glutInitWindowSize(CTX->cols, CTX->rows);
+    glutCreateWindow("rasterizer");
 
-        gettimeofday(&tval_after, NULL);
-        timersub(&tval_after, &tval_before, &tval_result);
-        global_frame_count+=1;
-        global_usec_sum+=tval_result.tv_usec; // usec/1000000 for seconds
-    }
-    exit_func();
-
-
-    /* glutInit(&argc, argv); */
-    /* glutInitDisplayMode(GLUT_DEPTH | GLUT_DOUBLE | GLUT_RGB); */
-    /* glutInitWindowSize(CTX->cols, CTX->rows); */
-    /* glutCreateWindow("rasterizer"); */
-
-    /* glutReshapeFunc(window_reshape); */
-    /* glutDisplayFunc(render_2d_texture); */
-    /* glutKeyboardFunc(keyboard_exit); */
-    /* atexit(exit_func); */
-    /* glutMainLoop(); */
+    glutReshapeFunc(window_reshape);
+    glutDisplayFunc(render_2d_texture);
+    glutKeyboardFunc(keyboard_exit);
+    atexit(exit_func);
+    glutMainLoop();
 }
 
 // glutMainLoop doesn't return control, need to cleanup this way

@@ -1,7 +1,8 @@
+#include "list.h"
+
+#include <string.h>
 #include <assert.h>
 #include <stdlib.h>
-#include <string.h>
-#include "list.h"
 
 void init_list(list *l, size_t n_bytes, size_t len)
 {

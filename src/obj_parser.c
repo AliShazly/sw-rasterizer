@@ -1,11 +1,10 @@
+#include "obj_parser.h"
+#include "list.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-
-#include "list.h"
-#include "obj_parser.h"
-
 
 char *skip_whitespace(char *str)
 {
