@@ -357,6 +357,7 @@ static void *object_thread(void *thread_args)
     }
 
     list_free(&clipped_pts);
+    list_free(&clipped_pts_w);
     return NULL;
 }
 
