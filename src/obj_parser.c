@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <limits.h>
 
 static char *skip_whitespace(char *str);
 static int backtrack_fileptr(FILE *fp, char *buffer, size_t buf_size, char key);
@@ -108,7 +109,7 @@ static void parse_idx_line(char *line_start_ptr, list *out_values)
         if (*line_start_ptr == ' ' || is_nullc)
         {
             line_start_ptr = skip_whitespace(line_start_ptr);
-            int tmp[3] = {-1, -1, -1};
+            int tmp[3] = {INT_MIN, INT_MIN, INT_MIN};
             parse_idx_cluster(start, tmp);
 
             start = line_start_ptr;
@@ -197,7 +198,7 @@ void parse_obj(char *filename, size_t *out_size,
             {
                 list line_values;
                 list_init(&line_values, sizeof(int[3]), 4); // Assuming <=4 verts per face
-                parse_idx_line(line_ptr, &line_values);
+                parse_idx_line(line_ptr, &line_values); // idx defaults to INT_MIN if not given
 
                 // doesn't change data if line is already a tri
                 triangulate(&line_values, &ids);
@@ -235,23 +236,32 @@ void parse_obj(char *filename, size_t *out_size,
         int vn_idx = cluster[2];
 
         // indicies can be negative, refering to the end of the array as -1
-        if (v_idx < 0)
+        if (v_idx < 0 && v_idx != INT_MIN)
+        {
             v_idx = (list_used(&verts) + v_idx) + 1;
-        if (vn_idx < 0)
+            assert(v_idx > 0);
+        }
+        if (vn_idx < 0 && vn_idx != INT_MIN)
+        {
             vn_idx = (list_used(&normals) + vn_idx) + 1;
-        if (vt_idx < 0)
+            assert(vn_idx > 0);
+        }
+        if (vt_idx < 0 && vt_idx != INT_MIN)
+        {
             vt_idx = (list_used(&texcoords) + vt_idx) + 1;
+            assert(vt_idx > 0);
+        }
 
         double *v_ptr = list_index(&verts, v_idx - 1);
         memcpy((*out_verts)[i], v_ptr, sizeof(double[3]));
 
         // vt and vn are optional
-        if (vt_idx != -1)
+        if (vt_idx != INT_MIN)
         {
             double *vt_ptr = list_index(&texcoords, vt_idx - 1);
             memcpy((*out_texcoords)[i], vt_ptr, sizeof(double[2]));
         }
-        if (vn_idx != -1)
+        if (vn_idx != INT_MIN)
         {
             double *vn_ptr = list_index(&normals, vn_idx - 1);
             memcpy((*out_normals)[i], vn_ptr, sizeof(double[3]));
