@@ -1,5 +1,3 @@
-# https://stackoverflow.com/questions/30573481/path-include-and-src-directory-makefile
-
 TARGET   = renderer
 OBJ_DIR  = obj
 SRC_DIR  = src
@@ -9,16 +7,20 @@ OBJ 	:= $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRC))
 
 CC       = clang
 CFLAGS   = -Wall -g -Iinclude
-OPTFLAGS = -O3 -Ofast -msse3 -mfpmath=sse
+OPTFLAGS = -O2 -msse2 -mfpmath=sse
 LDFLAGS  = -lm -lGL -lGLU -lglut -lpthread
 LDLIBS   =
 
-.PHONY: all clean
+.PHONY: all clean opt
 
 all: $(TARGET)
 
 $(TARGET): $(OBJ)
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+opt: $(OBJ)
+	$(CC) $(OPTFLAGS) $(LDFLAGS) $^ $(LDLIBS) -o $(TARGET)
+
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@

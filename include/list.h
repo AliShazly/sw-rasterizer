@@ -13,8 +13,13 @@ typedef struct
     size_t used;
 }list; // Dynamic array
 
-void init_list(list *l, size_t n_bytes, size_t len);
-void append_to_list(list *l, void *val);
-void *index_list(list *l, size_t index);
+void list_init(list *l, size_t n_bytes, size_t len);
+void *list_index(list *l, size_t index);
+void list_append(list *l, void *val);
+void list_set(list *l, size_t index, void *val);
+void list_clear(list *l);
+void *list_array(list *l);
+size_t list_used(list *l);
+void list_free(list *l);
 
 #endif

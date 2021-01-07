@@ -3,6 +3,9 @@ obj/
 *.jpg
 *.png
 *.o
+*.out
 vgcore*
-compile_flags.txt
+*.txt
 renderer
+help
+rendo

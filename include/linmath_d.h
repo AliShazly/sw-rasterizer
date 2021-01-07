@@ -1,6 +1,12 @@
 #ifndef LINMATH_H
 #define LINMATH_H
 
+// https://github.com/datenwolf/linmath.h
+// Changes:
+//    - Included string.h
+//    - Changed floats to doubles
+//    - Added vec##n##_magnitude()
+
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
@@ -59,7 +65,15 @@ LINMATH_H_FUNC void vec##n##_max(vec##n r, vec##n const a, vec##n const b) \
 	int i; \
 	for(i=0; i<n; ++i) \
 		r[i] = a[i]>b[i] ? a[i] : b[i]; \
-}
+} \
+LINMATH_H_FUNC double vec##n##_magnitude(vec##n const v) \
+{ \
+    double sum = 0; \
+	int i; \
+    for (i=0; i<n; ++i) \
+         sum += pow(v[i], 2); \
+    return sqrt(sum); \
+} \
 
 LINMATH_H_DEFINE_VEC(2)
 LINMATH_H_DEFINE_VEC(3)

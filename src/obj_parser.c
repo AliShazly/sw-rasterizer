@@ -5,8 +5,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <assert.h>
 
-char *skip_whitespace(char *str)
+static char *skip_whitespace(char *str);
+static int backtrack_fileptr(FILE *fp, char *buffer, size_t buf_size, char key);
+static void parse_coordinate(char *line, double ret[3], int n_values);
+static void parse_idx_cluster(char *start, int ret[3]);
+static void parse_idx_line(char *line_start_ptr, list *out_values);
+static void triangulate(list *face_verts, list *out_list);
+
+static char *skip_whitespace(char *str)
 {
     if (*str == ' ')
     {
@@ -17,7 +25,7 @@ char *skip_whitespace(char *str)
 }
 
 // Assuming fileptr is at buffer + 1 in the file
-int backtrack_fileptr(FILE *fp, char *buffer, size_t buf_size, char key)
+static int backtrack_fileptr(FILE *fp, char *buffer, size_t buf_size, char key)
 {
     for (int i = (buf_size-1); i >= 0; i--)
     {
@@ -33,7 +41,7 @@ int backtrack_fileptr(FILE *fp, char *buffer, size_t buf_size, char key)
 }
 
 // Parses vertex coords, texcoords, and uv coords
-void parse_coordinate(char *line, double ret[], int n_values)
+static void parse_coordinate(char *line, double ret[], int n_values)
 {
     int idx = 0;
     for (;; line++)
@@ -55,7 +63,7 @@ void parse_coordinate(char *line, double ret[], int n_values)
 // v1[/vt1][/vn1] ...
 // v1//vn1
 // v1/vt1
-void parse_idx_cluster(char *start, int ret[3])
+static void parse_idx_cluster(char *start, int ret[3])
 {
     int slash_offsets[2] = {0}; // max 2 slashes, min 0
     int idx = 0;
@@ -87,7 +95,7 @@ void parse_idx_cluster(char *start, int ret[3])
     }
 }
 
-void parse_idx_line(char *line_start_ptr, list *out_values)
+static void parse_idx_line(char *line_start_ptr, list *out_values)
 {
     line_start_ptr++; // skipping first char 'f'
     line_start_ptr = skip_whitespace(line_start_ptr);
@@ -104,7 +112,7 @@ void parse_idx_line(char *line_start_ptr, list *out_values)
             parse_idx_cluster(start, tmp);
 
             start = line_start_ptr;
-            append_to_list(out_values, tmp);
+            list_append(out_values, tmp);
         }
         if (is_nullc)
         {
@@ -114,16 +122,16 @@ void parse_idx_line(char *line_start_ptr, list *out_values)
 }
 
 // https://notes.underscorediscovery.com/obj-parser-easy-parse-time-triangulation/
-void triangulate(list *face_verts, list *out_list)
+static void triangulate(list *face_verts, list *out_list)
 {
     for (int i = 1; i < face_verts->used - 1; i++)
     {
-        int *corner0 = index_list(face_verts, 0);
-        int *corner1 = index_list(face_verts, i);
-        int *corner2 = index_list(face_verts, i + 1);
-        append_to_list(out_list, corner0);
-        append_to_list(out_list, corner1);
-        append_to_list(out_list, corner2);
+        int *corner0 = list_index(face_verts, 0);
+        int *corner1 = list_index(face_verts, i);
+        int *corner2 = list_index(face_verts, i + 1);
+        list_append(out_list, corner0);
+        list_append(out_list, corner1);
+        list_append(out_list, corner2);
     }
 }
 
@@ -137,25 +145,17 @@ void parse_obj(char *filename, size_t *out_size,
     list normals;
     list ids;
 
-    init_list(&verts, sizeof(double[3]), OBJ_LIST_SIZE);
-    init_list(&texcoords, sizeof(double[2]), OBJ_LIST_SIZE);
-    init_list(&normals, sizeof(double[3]), OBJ_LIST_SIZE);
-    init_list(&ids, sizeof(int[3]), OBJ_LIST_SIZE);
+    list_init(&verts, sizeof(double[3]), OBJ_LIST_SIZE);
+    list_init(&texcoords, sizeof(double[2]), OBJ_LIST_SIZE);
+    list_init(&normals, sizeof(double[3]), OBJ_LIST_SIZE);
+    list_init(&ids, sizeof(int[3]), OBJ_LIST_SIZE);
 
     size_t buf_size = sizeof(char) * OBJ_FILE_BUF_SIZE;
     char *buffer = calloc(OBJ_FILE_BUF_SIZE, sizeof(char));
-    if (buffer == NULL)
-    {
-        perror("malloc failed");
-        exit(1);
-    }
+    assert(buffer != NULL);
 
     FILE *fp = fopen(filename, "r");
-    if (fp == NULL)
-    {
-        perror("Unable to open file");
-        exit(1);
-    }
+    assert(fp != NULL);
 
     for(;;)
     {
@@ -176,34 +176,34 @@ void parse_obj(char *filename, size_t *out_size,
             {
                 double tmp[3];
                 parse_coordinate(line_ptr, tmp, 3);
-                append_to_list(&verts, tmp);
+                list_append(&verts, tmp);
             }
             // texcoord x y
             else if (memcmp(line_ptr, "vt", 2) == 0)
             {
                 double tmp[2];
                 parse_coordinate(line_ptr, tmp, 2);
-                append_to_list(&texcoords, tmp);
+                list_append(&texcoords, tmp);
             }
             // normal x y z
             else if (memcmp(line_ptr, "vn", 2) == 0)
             {
                 double tmp[3];
                 parse_coordinate(line_ptr, tmp, 3);
-                append_to_list(&normals, tmp);
+                list_append(&normals, tmp);
             }
             // face point indexes idx/idx/idx ...
             else if (memcmp(line_ptr, "f ", 2) == 0)
             {
                 list line_values;
-                init_list(&line_values, sizeof(int[3]), 4); // Assuming <=4 verts per face
+                list_init(&line_values, sizeof(int[3]), 4); // Assuming <=4 verts per face
                 parse_idx_line(line_ptr, &line_values);
 
                 // doesn't change data if line is already a tri
                 triangulate(&line_values, &ids);
 
 
-                free(line_values.array);
+                list_free(&line_values);
             }
 
             line_ptr = strtok(NULL, delim);
@@ -225,39 +225,43 @@ void parse_obj(char *filename, size_t *out_size,
     *out_verts = malloc(sizeof(double[3]) * *out_size);
     *out_texcoords = malloc(sizeof(double[2]) * *out_size);
     *out_normals = malloc(sizeof(double[3]) * *out_size);
-    if (out_verts == NULL || out_texcoords == NULL || out_normals == NULL)
-    {
-        perror("malloc failed");
-        exit(1);
-    }
+    assert(out_verts != NULL && out_texcoords != NULL && out_normals != NULL);
 
     for (int i = 0; i <ids.used; i++)
     {
-        int *cluster = index_list(&ids, i);
+        int *cluster = list_index(&ids, i);
         int v_idx = cluster[0];
         int vt_idx = cluster[1];
         int vn_idx = cluster[2];
 
-        double *v_ptr = index_list(&verts, v_idx - 1);
+        // indicies can be negative, refering to the end of the array as -1
+        if (v_idx < 0)
+            v_idx = (list_used(&verts) + v_idx) + 1;
+        if (vn_idx < 0)
+            vn_idx = (list_used(&normals) + vn_idx) + 1;
+        if (vt_idx < 0)
+            vt_idx = (list_used(&texcoords) + vt_idx) + 1;
+
+        double *v_ptr = list_index(&verts, v_idx - 1);
         memcpy((*out_verts)[i], v_ptr, sizeof(double[3]));
 
         // vt and vn are optional
         if (vt_idx != -1)
         {
-            double *vt_ptr = index_list(&texcoords, vt_idx - 1);
+            double *vt_ptr = list_index(&texcoords, vt_idx - 1);
             memcpy((*out_texcoords)[i], vt_ptr, sizeof(double[2]));
         }
         if (vn_idx != -1)
         {
-            double *vn_ptr = index_list(&normals, vn_idx - 1);
+            double *vn_ptr = list_index(&normals, vn_idx - 1);
             memcpy((*out_normals)[i], vn_ptr, sizeof(double[3]));
         }
     }
 
     // Cleanup
-    free(verts.array);
-    free(texcoords.array);
-    free(normals.array);
-    free(ids.array);
+    list_free(&verts);
+    list_free(&texcoords);
+    list_free(&normals);
+    list_free(&ids);
 }
 
