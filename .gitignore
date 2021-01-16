@@ -1,7 +1,6 @@
 models/
 obj/
 *.jpg
-*.png
 *.o
 *.out
 vgcore*
