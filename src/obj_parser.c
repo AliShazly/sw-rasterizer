@@ -238,17 +238,17 @@ void parse_obj(char *filename, size_t *out_size,
         // indicies can be negative, refering to the end of the array as -1
         if (v_idx < 0 && v_idx != INT_MIN)
         {
-            v_idx = (list_used(&verts) + v_idx) + 1;
+            v_idx = (verts.used + v_idx) + 1;
             assert(v_idx > 0);
         }
         if (vn_idx < 0 && vn_idx != INT_MIN)
         {
-            vn_idx = (list_used(&normals) + vn_idx) + 1;
+            vn_idx = (normals.used + vn_idx) + 1;
             assert(vn_idx > 0);
         }
         if (vt_idx < 0 && vt_idx != INT_MIN)
         {
-            vt_idx = (list_used(&texcoords) + vt_idx) + 1;
+            vt_idx = (texcoords.used + vt_idx) + 1;
             assert(vt_idx > 0);
         }
 

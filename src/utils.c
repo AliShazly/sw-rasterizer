@@ -27,6 +27,11 @@ double inc(double i, double lim)
     return t;
 }
 
+int ptr_dist(void *p1, void* p2)
+{
+    return (((char *)p2) - ((char *)p1));
+}
+
 int imin(int a, int b)
 {
     return a > b ? b : a;
@@ -90,15 +95,6 @@ bool point_in_bbox(vec2 p, double max_x, double min_x, double max_y, double min_
     return p[0] <= max_x && p[0] >= min_x && p[1] <= max_y && p[1] >= min_y;
 }
 
-// https://www.mathworks.com/matlabcentral/answers/16243-angle-between-two-vectors-in-3d
-double angle3D(vec3 a, vec3 b)
-{
-    vec3 c;
-    vec3_mul_cross(c, a, b);
-    double d = vec3_mul_inner(a, b);
-    return atan2(vec3_magnitude(c), d);
-}
-
 // https://en.wikipedia.org/wiki/Line%E2%80%93plane_intersection
 void plane_line_intersection(vec3 dst, vec3 a, vec3 b, vec3 plane_pt, vec3 plane_normal)
 {
@@ -110,82 +106,13 @@ void plane_line_intersection(vec3 dst, vec3 a, vec3 b, vec3 plane_pt, vec3 plane
     double num = vec3_mul_inner(tmp, plane_normal);
     double denom = vec3_mul_inner(direction, plane_normal);
 
-    // Not handling other cases
+    // Not handling other cases, if this ever trips, i'll handle them.
     assert(num != 0 && denom != 0);
 
     double d = num/denom;
 
-    vec3 intersection_pt;
     vec3_scale(tmp, direction, d);
-    vec3_add(intersection_pt, tmp, a);
-    memcpy(dst, intersection_pt, sizeof(vec3));
-}
-
-int orient_compare(const void *vc1, const void* vc2)
-{
-    // only need the first element of each struct for comparison
-    double theta1 = *((double *)vc1);
-    double theta2 = *((double *)vc2);
-
-    if (theta1 > theta2)
-        return 1;
-    else if (theta1 < theta2)
-        return -1;
-    else
-        // not worried about strict fp equality
-        return 0;
-}
-
-void orient_convex_polygon(vec3 *poly_pts, int poly_len, bool clockwise)
-{
-    typedef struct
-    {
-        double angle_to_centroid;
-        int    pt_index;
-    }VertCompare;
-
-    vec3 centroid;
-    mesh_centroid(centroid, poly_pts, poly_len);
-
-    VertCompare poly_compare[poly_len];
-    const int scale = clockwise ? 1 : -1; // sorting backwards for c-clockwise
-    for (int i = 0; i < poly_len; i++)
-    {
-        poly_compare[i].angle_to_centroid = angle3D(poly_pts[i], centroid) * scale;
-        poly_compare[i].pt_index = i;
-    }
-
-    // this fails if all angles are the same
-    qsort(poly_compare, poly_len, sizeof(VertCompare), orient_compare);
-
-    vec3 tmp_pts[poly_len];
-    memcpy(tmp_pts, poly_pts, poly_len * sizeof(vec3));
-    for (int i = 0; i < poly_len; i++)
-    {
-        int new_idx = poly_compare[i].pt_index;
-        memcpy(poly_pts[new_idx], tmp_pts[i], sizeof(vec3));
-    }
-}
-
-int fan_triangulate_out_len(int poly_len)
-{
-    return (poly_len - 2) * TRI_NPTS;
-}
-
-// https://en.wikipedia.org/wiki/Fan_triangulation
-// keeps vertex orientation, returns triangles unchanged.
-void fan_triangulate(vec3 *poly_pts, int poly_len, vec3 out_pts[fan_triangulate_out_len(poly_len)])
-{
-    int out_idx = 0;
-    for (int i = 1; i < poly_len - 1; i++)
-    {
-        memcpy(out_pts[out_idx++], poly_pts[0], sizeof(vec3));
-
-        // combining two memcpy calls
-        memcpy(out_pts[out_idx], poly_pts[i], sizeof(vec3) * 2);
-        out_idx += 2;
-    }
-    /* assert(out_idx == fan_triangulate_len(poly_len)); */
+    vec3_add(dst, tmp, a);
 }
 
 void mesh_bounds(vec3 *verts, size_t n_verts, vec3 out_min, vec3 out_max)
@@ -223,8 +150,9 @@ void mesh_bounds(vec3 *verts, size_t n_verts, vec3 out_min, vec3 out_max)
     memcpy(out_max, maxs, sizeof(vec3));
 }
 
-void mesh_centroid(vec3 dst, vec3 *verts, size_t n_verts)
+void mesh_centroid(vec3 dst, int n_verts, int vert_size, double (*verts)[vert_size])
 {
+    assert(vert_size >= 3);
     long double sum_x, sum_y, sum_z;
     sum_x = sum_y = sum_z = 0;
     for (int i = 0; i < n_verts; i++)
@@ -239,7 +167,7 @@ void mesh_centroid(vec3 dst, vec3 *verts, size_t n_verts)
 }
 
 // computes surface normal of triangle
-void surface_normal(vec3 dst, vec3 triangle[TRI_NPTS])
+void triangle_normal(vec3 dst, int tri_pt_size, double triangle[TRI_NPTS][tri_pt_size])
 {
     vec3 v;
     vec3 w;

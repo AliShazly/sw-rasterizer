@@ -3,8 +3,8 @@
 
 #include <stdint.h>
 
-// 28.4 fixed point
-#define FIXED_FRACTION_BITS 4
+// 26.6 fixed point
+#define FIXED_FRACTION_BITS 6
 #define FIXED_SCALE_FACTOR (1 << FIXED_FRACTION_BITS)
 
 typedef int32_t fixed_t;

@@ -46,16 +46,6 @@ void list_clear(list *l)
     l->used = 0;
 }
 
-void *list_array(list *l)
-{
-    return l->array;
-}
-
-size_t list_used(list *l)
-{
-    return l->used;
-}
-
 void list_free(list *l)
 {
     free(l->array);

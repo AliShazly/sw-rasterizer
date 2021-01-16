@@ -23,17 +23,14 @@ typedef struct
 
 }ThreadArgs;
 
-enum ClipFlag{CLIP_CLIPPED, CLIP_UNCLIPPED, CLIP_DONT_DRAW};
+enum ClipFlag{CLIPPED_TRI, CLIPPED_QUAD, UNCLIPPED, DONT_DRAW};
 
 static void ortho_projection(vec2 dst, vec3 pt, vec2 scale, vec2 offset);
 static void gl_projection_mat(mat4x4 ret, double t, double b, double l, double r, double n, double f);
 static void view_frustum_bounds(double out_bounds[4], double angle_of_view, double aspect, double z);
 static void world_to_clip(vec4 dst, vec4 world_pt, mat4x4 view_mat, double aspect, double fov_deg, double near, double far);
 static void clip_space_to_screen(vec4 out_screen_pt, vec4 clip_space_pt, int rows, int cols);
-static void tri_cplane_intersection(vec4 triangle[TRI_NPTS], int clip_mask[TRI_NPTS], double clipping_plane_z,
-        list/*<vec4>*/ *out_pts, list/*<double>*/ *out_w_coords);
-static enum ClipFlag clip_triangle_near(vec4 triangle[TRI_NPTS], double near,
-        list/*<vec3>*/ *out_pts, list/*<double>*/ *out_w_coords);
+static enum ClipFlag clip_triangle_near(vec4 triangle[TRI_NPTS], vec4 out_pts[TRI_NPTS * 2], double near_clip);
 static bool cull_triangle(vec4 triangle[TRI_NPTS]);
 static void rotate_point(vec3 dst, vec3 axis, vec3 position, double theta);
 static double light_triangle(vec3 camera_z, vec3 world_tri[TRI_NPTS]);
@@ -132,8 +129,7 @@ static void world_to_clip(vec4 dst, vec4 world_pt, mat4x4 view_mat, double aspec
 
 static void clip_space_to_screen(vec4 out_screen_pt, vec4 clip_space_pt, int rows, int cols)
 {
-    assert(clip_space_pt[3] > 0 || clip_space_pt[3] < 0);
-
+    assert(clip_space_pt[3] != 0);
     // perspective division by w normalizes pt to -1,1 NDC coords
     vec3 ndc_pt;
     ndc_pt[0] = clip_space_pt[0] / clip_space_pt[3];
@@ -148,77 +144,101 @@ static void clip_space_to_screen(vec4 out_screen_pt, vec4 clip_space_pt, int row
     out_screen_pt[3] = 1 / clip_space_pt[3]; // depth inverse for persp correct interpolation
 }
 
-static void tri_cplane_intersection(vec4 triangle[TRI_NPTS], int clip_mask[TRI_NPTS], double clipping_plane_z,
-        list/*<vec4>*/ *out_pts, list/*<double>*/ *out_w_coords)
+// clips the clip space triangle against the near clip plane
+// clipped output is either one or two ordered triangles.
+static enum ClipFlag clip_triangle_near(vec4 triangle[TRI_NPTS], vec4 out_pts[TRI_NPTS * 2], double near_clip)
 {
-    vec3 point_on_plane = {0, 0, clipping_plane_z};
-    vec3 plane_normal = {0, 0, 1}; // Normal sign doesn't matter
+    vec4 *clipped_pts[TRI_NPTS];
+    vec4 *unclipped_pts[TRI_NPTS];
+    int n_clipped_pts = 0;
+    int n_unclipped_pts = 0;
 
-    vec4 clipped[2];
-    vec4 unclipped[2];
-    int n_clipped = 0;
-    int n_unclipped = 0;
     for (int i = 0; i < TRI_NPTS; i++)
     {
-        if (clip_mask[i] != 0){
-            memcpy(clipped[n_clipped++], triangle[i], sizeof(vec4));
+        if (triangle[i][3] < near_clip)
+        {
+            clipped_pts[n_clipped_pts++] = &triangle[i];
         }
-        else {
-            memcpy(unclipped[n_unclipped++], triangle[i], sizeof(vec4));
+        else
+        {
+            unclipped_pts[n_unclipped_pts++] = &triangle[i];
         }
     }
 
-    /* printf("-------------------------------------------------------------------\n"); */
-    /* for (int i = 0; i < n_clipped; i++) */
-    /* { */
-    /*     printf("clipped: "); */
-    /*     print_vecn(clipped[i], 4); */
-    /* } */
-    /* for (int i = 0; i < n_unclipped; i++) */
-    /* { */
-    /*     printf("unclipped: "); */
-    /*     print_vecn(unclipped[i], 4); */
-    /* } */
-    /* printf("-------------------------------------------------------------------\n"); */
-
-}
-
-// clips the clip space triangle against the near/far clip planes
-// clipped output is an unordered set of points that should represent a convex polygon
-static enum ClipFlag clip_triangle_near(vec4 triangle[TRI_NPTS], double near,
-        list/*<vec3>*/ *out_pts, list/*<double>*/ *out_w_coords)
-{
-    list_clear(out_pts);
-    list_clear(out_w_coords);
-
-    int clip_mask[TRI_NPTS];
-    for (int i = 0; i < TRI_NPTS; i++)
+    // triangle doesn't touch clipping plane
+    if (n_clipped_pts == 0)
     {
-        const double tri_w = triangle[i][3];
-        clip_mask[i] = (tri_w < near) ? 1 : 0;
+        return UNCLIPPED;
+    }
+    // triangle enveloped by clipping plane
+    else if (n_unclipped_pts == 0)
+    {
+        return DONT_DRAW;
     }
 
-    // triangle not intersecting with clipping plane
-    if (!(clip_mask[0] || clip_mask[1] || clip_mask[2]))
-    {
-        return CLIP_UNCLIPPED;
-    }
-    // triangle fully occluded by clipping plane
-    else if (clip_mask[0] && clip_mask[1] && clip_mask[2])
-    {
-        return CLIP_DONT_DRAW;
-    }
+    // 2 intersections between tri and clipping plane should be guaranteed from here
 
-    // TODO: need to handle the case where triangle intersects both
-    //       near and far plane
-    tri_cplane_intersection(triangle, clip_mask, near, out_pts, out_w_coords);
-    return CLIP_CLIPPED;
+    // if there are 2 unclipped points, plus the 2 from the
+    // plane intersections, the 4 points (quad) need to be triangulated.
+    // otherwise, the return will only have 3 points (tri).
+    bool clipped_quad = (n_unclipped_pts == 2);
+
+    // When idx 1 is the only clipped point, the triangulated quad gets created with a clockwise (backwards) winding order
+    // I'm not sure if this is always the case, but flipping it based on this seems to work.
+    bool quad_flip = (clipped_quad) && ((int)(ptr_dist(triangle[0], clipped_pts[0]) / sizeof(vec4)) == 1);
+
+    vec3 plane_pt = {0, 0, -near_clip}; // in front of camera, negative z
+    vec3 plane_normal = {0, 0, 1};
+    for (int i = 0; i < n_unclipped_pts; i++)
+    {
+        for (int j = 0; j < n_clipped_pts; j++)
+        {
+            vec4 intersect;
+
+            intersect[3] = near_clip;
+            plane_line_intersection(intersect, *unclipped_pts[i], *clipped_pts[j],
+                    plane_pt, plane_normal);
+
+            if (clipped_quad)
+            {
+                // first triangle  (i==0) -> {intersect, unclipped[i], unclipped[i + 1]}
+                // second triangle (i==1) -> {unclipped[i], intersect, prev_intersect}
+
+                if (i == 0)
+                {
+                    memcpy(out_pts[0], intersect, sizeof(vec4));
+                    memcpy(out_pts[quad_flip ? 2 : 1], *unclipped_pts[i], sizeof(vec4));
+                    memcpy(out_pts[quad_flip ? 1 : 2], *unclipped_pts[i + 1], sizeof(vec4));
+                }
+                else // i == 1
+                {
+                    memcpy(out_pts[3], *unclipped_pts[i], sizeof(vec4));
+                    memcpy(out_pts[quad_flip ? 5 : 4], intersect, sizeof(vec4));
+                    memcpy(out_pts[quad_flip ? 4 : 5], out_pts[0], sizeof(vec4));
+                }
+
+            }
+            else // clipped_tri
+            {
+                // intersected point inherits it's clipped idx to keep winding order consistent
+                int orig_idx = ptr_dist(triangle[0], clipped_pts[j]) / sizeof(vec4);
+                memcpy(out_pts[orig_idx], intersect, sizeof(vec4));
+            }
+        }
+
+        if (!clipped_quad)
+        {
+            int orig_idx = ptr_dist(triangle[0], unclipped_pts[i]) / sizeof(vec4);
+            memcpy(out_pts[orig_idx], *unclipped_pts[i], sizeof(vec4));
+        }
+    }
+    return clipped_quad ? CLIPPED_QUAD : CLIPPED_TRI;
 }
 
 // culls clip space triangle against viewport
 static bool cull_triangle(vec4 triangle[TRI_NPTS])
 {
-    int clip_mask[TRI_NPTS] = {0};
+    int clip_mask[TRI_NPTS];
     for (int i = 0; i < TRI_NPTS; i++)
     {
         double w = triangle[i][3];
@@ -263,7 +283,7 @@ static void rotate_point(vec3 dst, vec3 axis, vec3 position, double theta)
 static double light_triangle(vec3 camera_z, vec3 world_tri[TRI_NPTS])
 {
     vec3 normal;
-    surface_normal(normal, world_tri);
+    triangle_normal(normal, 3, world_tri);
 
     // light direction
     vec3 neg_cam = {-camera_z[0],-camera_z[1],-camera_z[2]};
@@ -277,26 +297,19 @@ static void *object_thread(void *thread_args)
 
     const double aspect = (double) ctx->rows / ctx->cols;
 
-    // predicting tri gets split into at max 2 other tris after clip
-    const int n_split_pts = 2 * TRI_NPTS;
-
-    list clipped_pts;
-    list_init(&clipped_pts, sizeof(vec3), n_split_pts);
-
-    // storing clip space w coords seperately to have a contiguous vec3 array
-    list clipped_pts_w;
-    list_init(&clipped_pts_w, sizeof(double), n_split_pts);
+    color_t tri_color = {90, 230, 95};
 
     for (int i = args->start_idx; i < args->end_idx + 1;  i+=TRI_NPTS)
     {
-        color_t tri_color = {90, 230, 95};
 
         vec4 clip_space_tri[TRI_NPTS];
+        vec4 clipped_pts[TRI_NPTS * 2]; // clipped tri gets split into max 2 other tris
+
         for (int j = 0; j < TRI_NPTS; j++)
         {
             vec4 rotated_pt = {0, 0, 0, 1};
             vec3 norm_rot_axis = {0, 1, 0};
-            rotate_point(rotated_pt, norm_rot_axis, ctx->mesh->verts[i + j], args->time);
+            rotate_point(rotated_pt, norm_rot_axis, ctx->mesh->verts[i + j], 0);
 
             world_to_clip(clip_space_tri[j], rotated_pt, ctx->view_mat, aspect, FOV, NEAR_CLIP, FAR_CLIP);
         }
@@ -307,64 +320,63 @@ static void *object_thread(void *thread_args)
             continue;
         }
 
-        enum ClipFlag flag = clip_triangle_near(clip_space_tri, NEAR_CLIP,
-                &clipped_pts, &clipped_pts_w);
+        enum ClipFlag flag = clip_triangle_near(clip_space_tri, clipped_pts, NEAR_CLIP);
 
         switch (flag)
         {
-            case CLIP_CLIPPED:
-            {
-                /* // getting the raw array used by the list structure */
-                /* int n_clipped_pts = list_used(&clipped_pts); */
-                /* vec3 *clipped_pts_arr = list_array(&clipped_pts); */
-
-                /* assert(n_clipped_pts == list_used(&clipped_pts_w)); */
-
-                /* vec3 screenpt; */
-                /* for (int i = 0; i < n_clipped_pts; i++) */
-                /* { */
-                /*     vec4 clip_space_pt; */
-                /*     clip_space_pt[0] = clipped_pts_arr[i][0]; */
-                /*     clip_space_pt[1] = clipped_pts_arr[i][1]; */
-                /*     clip_space_pt[2] = clipped_pts_arr[i][2]; */
-                /*     clip_space_pt[3] = *((double*)list_index(&clipped_pts_w, i)); */
-
-                /*     clip_space_to_screen(screenpt, clip_space_pt, ctx->rows, ctx->cols); */
-                /*     draw_point(screenpt, tri_color, 2, ctx); */
-                /* } */
-                break;
-            }
-            case CLIP_UNCLIPPED:
+            case UNCLIPPED:
             {
                 vec4 screen_tri[TRI_NPTS];
                 for (int i = 0; i < TRI_NPTS; i++)
                 {
                     clip_space_to_screen(screen_tri[i], clip_space_tri[i], ctx->rows, ctx->cols);
                 }
-                draw_triangle(screen_tri, tri_color, ctx);
+                draw_triangle(screen_tri, tri_color, false, ctx);
                 /* for (int i = 0; i < TRI_NPTS; i++) */
                 /* { */
                 /*     draw_point(screen_tri[i], tri_color, 2, ctx); */
                 /* } */
                 break;
             }
-            case CLIP_DONT_DRAW:
+            case CLIPPED_TRI:
+            {
+                vec4 screen_tri[TRI_NPTS];
+                for (int i = 0; i < TRI_NPTS; i++)
+                {
+                    clip_space_to_screen(screen_tri[i], clipped_pts[i], ctx->rows, ctx->cols);
+                }
+                color_t t_color = {0, 0, 255};
+                draw_triangle(screen_tri, t_color, false, ctx);
+                break;
+            }
+            case CLIPPED_QUAD:
+            {
+                for (int i = 0; i < TRI_NPTS * 2; i+=TRI_NPTS)
+                {
+                    vec4 screen_tri[TRI_NPTS];
+                    for (int j = 0; j < TRI_NPTS; j++)
+                    {
+                        clip_space_to_screen(screen_tri[j], clipped_pts[i + j], ctx->rows, ctx->cols);
+                    }
+                    color_t q_color = {255, 0, 0};
+                    draw_triangle(screen_tri, q_color, false, ctx);
+                }
+                break;
+            }
+            case DONT_DRAW:
             {
                 // Do nothing
                 break;
             }
         }
     }
-
-    list_free(&clipped_pts);
-    list_free(&clipped_pts_w);
     return NULL;
 }
 
 // TODO: your threads are shit
 void draw_object_threads(RenderCtx *ctx)
 {
-    double time = inc(0.01, 1000);
+    double time = inc(0.01, 360);
     pthread_t threads[ctx->n_threads];
     ThreadArgs *args[ctx->n_threads];
 

@@ -52,32 +52,32 @@ void keyboard_func(unsigned char c, int x, int y)
     }
     else if (c == 'w')
     {
-        vec3 offset = {0, 0, 0.1};
+        vec3 offset = {0, 0, 0.01};
         move_camera(CTX, offset);
     }
     else if (c == 's')
     {
-        vec3 offset = {0, 0, -0.1};
+        vec3 offset = {0, 0, -0.01};
         move_camera(CTX, offset);
     }
     else if (c == 'a')
     {
-        vec3 offset = {-0.1, 0, 0};
+        vec3 offset = {-0.01, 0, 0};
         move_camera(CTX, offset);
     }
     else if (c == 'd')
     {
-        vec3 offset = {0.1, 0, 0};
+        vec3 offset = {0.01, 0, 0};
         move_camera(CTX, offset);
     }
     else if (c == 'e')
     {
-        vec3 offset = {0, 0.1, 0};
+        vec3 offset = {0, 0.01, 0};
         move_camera(CTX, offset);
     }
     else if (c == 'q')
     {
-        vec3 offset = {0, -0.1, 0};
+        vec3 offset = {0, -0.01, 0};
         move_camera(CTX, offset);
     }
 }

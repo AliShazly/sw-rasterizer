@@ -91,12 +91,12 @@ RenderCtx init_renderer()
     // parse_obj should return all faces as tris, but let's make sure
     assert(mesh->size % 3 == 0);
 
-    mesh_centroid(mesh->centroid, mesh->verts, mesh->size);
+    mesh_centroid(mesh->centroid, mesh->size, 3, mesh->verts);
 
     ctx.grid_points = compute_grid(3, 5, &ctx.grid_rows, &ctx.grid_cols);
 
     vec3 up = UP_VECTOR;
-    vec3 camera_pos = {0, 0, -2};
+    vec3 camera_pos = {0, 0, -1};
     /* vec3 cam_front = {0,0,1}; */
     /* vec3 target; */
     /* vec3_add(target, camera_pos, cam_front); */

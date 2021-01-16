@@ -9,6 +9,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <float.h>
+#include <stdint.h>
 
 typedef fixed_t vec2_fixed[2];
 
@@ -17,6 +18,7 @@ static bool top_left_edge_cclock(vec2_fixed p1, vec2_fixed p2);
 static fixed_t edge_func(vec2_fixed a, vec2_fixed b, vec2_fixed c);
 static bool point_in_circle(vec2 pt, vec2 center, int radius);
 static void circle_bbox(vec2 center, int radius, int *max_x, int *max_y, int *min_x, int *min_y);
+
 
 // x,y screen coord to corresponding 1D buffer array index
 static int coord_to_idx(int x, int y, int rows, int cols)
@@ -34,10 +36,8 @@ static bool top_left_edge_cclock(vec2_fixed p1, vec2_fixed p2)
 }
 
 // point c in relation to edge ab
-// https://en.wikipedia.org/wiki/Linear_equation#Determinant_form
 static fixed_t edge_func(vec2_fixed a, vec2_fixed b, vec2_fixed c)
 {
-    /* return ((c[0] - a[0]) * (b[1] - a[1]) - (c[1] - a[1]) * (b[0] - a[0])); */
     fixed_t m0 = fixed_mult((c[0] - a[0]), (b[1] - a[1]));
     fixed_t m1 = fixed_mult((c[1] - a[1]), (b[0] - a[0]));
     return m0 - m1;
@@ -57,12 +57,11 @@ static void circle_bbox(vec2 center, int radius, int *max_x, int *max_y, int *mi
     *min_y = center[1] - radius;
 }
 
-
 // http://people.csail.mit.edu/ericchan/bib/pdf/p17-pineda.pdf
 // this assumes triangle has a counter clockwise winding order
-void draw_triangle(vec4 triangle[TRI_NPTS], color_t fill, RenderCtx *ctx)
+void draw_triangle(vec4 triangle[TRI_NPTS], color_t fill, bool two_sided, RenderCtx *ctx)
 {
-    // converting x/y coords to 28.4 fixed point
+    // converting x/y coords to 26.6 fixed point
     vec2_fixed a = {
         fixed_from_dbl(triangle[0][0]),
         fixed_from_dbl(triangle[0][1])};
@@ -127,7 +126,8 @@ void draw_triangle(vec4 triangle[TRI_NPTS], color_t fill, RenderCtx *ctx)
 
         for (int sp_x = min_x; sp_x <= max_x; sp_x+=pstep)
         {
-            if (w0 > 0 && w1 > 0 && w2 > 0)
+            bool backface = (w0 < 0 && w1 < 0 && w2 < 0) && two_sided;
+            if ((w0 > 0 && w1 > 0 && w2 > 0) || backface)
             {
                 double w0_a = fixed_to_dbl(fixed_divide(w0, area));
                 double w1_a = fixed_to_dbl(fixed_divide(w1, area));
@@ -145,18 +145,18 @@ void draw_triangle(vec4 triangle[TRI_NPTS], color_t fill, RenderCtx *ctx)
                 {
                     ctx->z_buffer[buf_idx] = pixel_z;
 
-                    /* ctx->buffer[buf_idx][0] = fill[0]; */
+                    ctx->buffer[buf_idx][0] = fill[0];
                     /* ctx->buffer[buf_idx][1] = fill[1]; */
-                    /* ctx->buffer[buf_idx][2] = fill[2]; */
+                    ctx->buffer[buf_idx][2] = fill[2];
 
-                    ctx->buffer[buf_idx][0] = w0_a * 255;
+                    /* ctx->buffer[buf_idx][0] = w0_a * 255; */
                     ctx->buffer[buf_idx][1] = w1_a * 255;
                     /* ctx->buffer[buf_idx][2] = w2_a * 255; */
 
                     int p_v = clamp(normalize(pixel_z, 2.5, -.1) * 255, 0, 255);
                     /* ctx->buffer[buf_idx][0] = p_v; */
                     /* ctx->buffer[buf_idx][1] = p_v; */
-                    ctx->buffer[buf_idx][2] = p_v;
+                    /* ctx->buffer[buf_idx][2] = p_v; */
                 }
             }
             w0 += w0_step_x;
@@ -168,6 +168,7 @@ void draw_triangle(vec4 triangle[TRI_NPTS], color_t fill, RenderCtx *ctx)
         w2_row += w2_step_y;
     }
 }
+
 
 void draw_point(vec2 p, color_t color, int radius, RenderCtx *ctx)
 {
@@ -188,6 +189,7 @@ void draw_point(vec2 p, color_t color, int radius, RenderCtx *ctx)
             if (point_in_circle(sp, p, radius))
             {
                 int idx = coord_to_idx(sp[0], sp[1], ctx->rows, ctx->cols);
+
                 memcpy(ctx->buffer[idx], color, sizeof(color_t));
             }
         }
