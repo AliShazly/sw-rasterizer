@@ -3,7 +3,7 @@
 
 #include "context.h"
 
-void draw_object_threads(RenderCtx *ctx);
+void draw_object(RenderCtx *ctx);
 void draw_object_wireframe(RenderCtx *ctx);
 void draw_grid(RenderCtx *ctx);
 

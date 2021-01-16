@@ -11,14 +11,13 @@
 #include <float.h>
 #include <stdint.h>
 
-typedef fixed_t vec2_fixed[2];
+typedef fixed_t vec2_fixed_t[2];
 
 static int coord_to_idx(int x, int y, int rows, int cols);
-static bool top_left_edge_cclock(vec2_fixed p1, vec2_fixed p2);
-static fixed_t edge_func(vec2_fixed a, vec2_fixed b, vec2_fixed c);
+static bool top_left_edge_cclock(vec2_fixed_t p1, vec2_fixed_t p2);
+static fixed_t edge_func(vec2_fixed_t a, vec2_fixed_t b, vec2_fixed_t c);
 static bool point_in_circle(vec2 pt, vec2 center, int radius);
 static void circle_bbox(vec2 center, int radius, int *max_x, int *max_y, int *min_x, int *min_y);
-
 
 // x,y screen coord to corresponding 1D buffer array index
 static int coord_to_idx(int x, int y, int rows, int cols)
@@ -29,14 +28,14 @@ static int coord_to_idx(int x, int y, int rows, int cols)
     return row * cols + x;
 }
 
-static bool top_left_edge_cclock(vec2_fixed p1, vec2_fixed p2)
+static bool top_left_edge_cclock(vec2_fixed_t p1, vec2_fixed_t p2)
 {
     // left edge goes down, top edge is exactly horizontal and goes towards the left
     return ((p1[1] > p2[1]) || (p1[1] == p2[1] && p1[0] < p2[0]));
 }
 
 // point c in relation to edge ab
-static fixed_t edge_func(vec2_fixed a, vec2_fixed b, vec2_fixed c)
+static fixed_t edge_func(vec2_fixed_t a, vec2_fixed_t b, vec2_fixed_t c)
 {
     fixed_t m0 = fixed_mult((c[0] - a[0]), (b[1] - a[1]));
     fixed_t m1 = fixed_mult((c[1] - a[1]), (b[0] - a[0]));
@@ -62,13 +61,13 @@ static void circle_bbox(vec2 center, int radius, int *max_x, int *max_y, int *mi
 void draw_triangle(vec4 triangle[TRI_NPTS], color_t fill, bool two_sided, RenderCtx *ctx)
 {
     // converting x/y coords to 26.6 fixed point
-    vec2_fixed a = {
+    vec2_fixed_t a = {
         fixed_from_dbl(triangle[0][0]),
         fixed_from_dbl(triangle[0][1])};
-    vec2_fixed b = {
+    vec2_fixed_t b = {
         fixed_from_dbl(triangle[1][0]),
         fixed_from_dbl(triangle[1][1])};
-    vec2_fixed c = {
+    vec2_fixed_t c = {
         fixed_from_dbl(triangle[2][0]),
         fixed_from_dbl(triangle[2][1])};
 
@@ -102,7 +101,7 @@ void draw_triangle(vec4 triangle[TRI_NPTS], color_t fill, bool two_sided, Render
     int bias_w1 = top_left_edge_cclock(c, a) ? 0 : 1;
     int bias_w2 = top_left_edge_cclock(a, b) ? 0 : 1;
 
-    vec2_fixed min_corner = {
+    vec2_fixed_t min_corner = {
         fixed_from_dbl(min_x + 0.5),
         fixed_from_dbl(min_y + 0.5)};
     fixed_t w0_row = edge_func(b, c, min_corner) + fixed_from_dbl(bias_w0);
@@ -126,7 +125,7 @@ void draw_triangle(vec4 triangle[TRI_NPTS], color_t fill, bool two_sided, Render
 
         for (int sp_x = min_x; sp_x <= max_x; sp_x+=pstep)
         {
-            bool backface = (w0 < 0 && w1 < 0 && w2 < 0) && two_sided;
+            bool backface = two_sided && (w0 < 0 && w1 < 0 && w2 < 0);
             if ((w0 > 0 && w1 > 0 && w2 > 0) || backface)
             {
                 double w0_a = fixed_to_dbl(fixed_divide(w0, area));
@@ -153,10 +152,10 @@ void draw_triangle(vec4 triangle[TRI_NPTS], color_t fill, bool two_sided, Render
                     ctx->buffer[buf_idx][1] = w1_a * 255;
                     /* ctx->buffer[buf_idx][2] = w2_a * 255; */
 
-                    int p_v = clamp(normalize(pixel_z, 2.5, -.1) * 255, 0, 255);
-                    /* ctx->buffer[buf_idx][0] = p_v; */
-                    /* ctx->buffer[buf_idx][1] = p_v; */
-                    /* ctx->buffer[buf_idx][2] = p_v; */
+                    /* int pixel_z_scaled = clamp(normalize(pixel_z, 2.5, -.1) * 255, 0, 255); */
+                    /* ctx->buffer[buf_idx][0] = pixel_z_scaled; */
+                    /* ctx->buffer[buf_idx][1] = pixel_z_scaled; */
+                    /* ctx->buffer[buf_idx][2] = pixel_z_scaled; */
                 }
             }
             w0 += w0_step_x;
@@ -196,67 +195,40 @@ void draw_point(vec2 p, color_t color, int radius, RenderCtx *ctx)
     }
 }
 
-void draw_line(vec2 p1, vec2 p2, color_t color, int thick, RenderCtx *ctx)
-{
-    vec2 thickness = {thick, thick};
-
-    vec2 a2;
-    vec2_add(a2, p1, thickness);
-
-    vec2 b2;
-    vec2_add(b2, p2, thickness);
-
-    vec3 tri_a[3] = {
-        {p1[0], p1[1], 1},
-        {a2[0], a2[1], 1},
-        {p2[0], p2[1], 1}
-    };
-
-    vec3 tri_b[3] = {
-        {p2[0], p2[1], 1},
-        {b2[0], b2[1], 1},
-        {a2[0], a2[0], 1}
-    };
-
-    /* draw_triangle(tri_a, color, ctx); */
-    /* draw_triangle(tri_b, color, ctx); */
-
-}
-
 // https://en.wikipedia.org/wiki/Bresenham%27s_line_algorithm#All_cases
-/* void draw_line(int x0, int y0, int x1, int y1, color_t color, RenderCtx *ctx) */
-/* { */
-/*     int dx = abs(x1 - x0); */
-/*     int sx = x0 < x1 ? 1 : -1; */
-/*     int dy = -abs(y1 - y0); */
-/*     int sy = y0 < y1 ? : -1; */
-/*     int err = dx + dy; */
-/*     for(;;) */
-/*     { */
-/*         // if point is in bounds */
-/*         if ((x0 < ctx->cols && x0 > 0) && (y0 < ctx->rows && y0 > 0)) */
-/*         { */
-/*             // plotting point */
-/*             int idx = coord_to_idx(x0, y0, ctx->rows, ctx->cols); */
-/*             for (int i = 0; i < 3; i++) */
-/*             { */
-/*                 ctx->buffer[idx][i] = color[i]; */
-/*             } */
-/*         } */
+void draw_line(int x0, int y0, int x1, int y1, color_t color, RenderCtx *ctx)
+{
+    int dx = abs(x1 - x0);
+    int sx = x0 < x1 ? 1 : -1;
+    int dy = -abs(y1 - y0);
+    int sy = y0 < y1 ? : -1;
+    int err = dx + dy;
+    for(;;)
+    {
+        // if point is in bounds
+        if ((x0 < ctx->cols && x0 > 0) && (y0 < ctx->rows && y0 > 0))
+        {
+            // plotting point
+            int idx = coord_to_idx(x0, y0, ctx->rows, ctx->cols);
+            for (int i = 0; i < 3; i++)
+            {
+                ctx->buffer[idx][i] = color[i];
+            }
+        }
 
-/*         if (x0 == x1 && y0 == y1) */
-/*             break; */
-/*         int e2 = 2 * err; */
-/*         if (e2 > dy) */
-/*         { */
-/*             err += dy; */
-/*             x0 += sx; */
-/*         } */
-/*         if (e2 <= dx) */
-/*         { */
-/*             err += dx; */
-/*             y0 += sy; */
-/*         } */
-/*     } */
-/* } */
+        if (x0 == x1 && y0 == y1)
+            break;
+        int e2 = 2 * err;
+        if (e2 > dy)
+        {
+            err += dy;
+            x0 += sx;
+        }
+        if (e2 <= dx)
+        {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
 

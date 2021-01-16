@@ -4,7 +4,9 @@
 
 #include <GL/glut.h>
 #include <sys/time.h>
-#include <pthread.h>
+
+// all this is extremely temporary and messy
+// I just really don't want to learn how to do this in X11
 
 #define CTX global_render_context_ptr
 RenderCtx *CTX;
@@ -101,12 +103,10 @@ void render_2d_texture()
     struct timeval tval_before, tval_after, tval_result;
     gettimeofday(&tval_before, NULL);
 
-    swap_buffers(CTX);
-    pthread_t clear_thread = clear_buffers_start(CTX);
+    clear_buffers(CTX);
     /* draw_grid(CTX); */
-    draw_object_threads(CTX);
+    draw_object(CTX);
     /* draw_object_wireframe(CTX); */
-    wait_for_clear(clear_thread);
 
     gettimeofday(&tval_after, NULL);
     timersub(&tval_after, &tval_before, &tval_result);

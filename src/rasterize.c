@@ -11,17 +11,7 @@
 #include <assert.h>
 #include <string.h>
 #include <float.h>
-#include <pthread.h>
 #include <stdbool.h>
-
-typedef struct
-{
-    size_t start_idx;
-    size_t end_idx;
-    double time; // temporary
-    RenderCtx *ctx;
-
-}ThreadArgs;
 
 enum ClipFlag{CLIPPED_TRI, CLIPPED_QUAD, UNCLIPPED, DONT_DRAW};
 
@@ -34,9 +24,7 @@ static enum ClipFlag clip_triangle_near(vec4 triangle[TRI_NPTS], vec4 out_pts[TR
 static bool cull_triangle(vec4 triangle[TRI_NPTS]);
 static void rotate_point(vec3 dst, vec3 axis, vec3 position, double theta);
 static double light_triangle(vec3 camera_z, vec3 world_tri[TRI_NPTS]);
-static void *object_thread(void *thread_args);
 
-// https://learnopengl.com/Getting-started/Camera
 void lookat(vec3 camera_pos, vec3 target, mat4x4 dst, vec3 up)
 {
     // camera forward vector
@@ -290,16 +278,15 @@ static double light_triangle(vec3 camera_z, vec3 world_tri[TRI_NPTS])
     return vec3_mul_inner(normal, neg_cam);
 }
 
-static void *object_thread(void *thread_args)
+void draw_object(RenderCtx *ctx)
 {
-    ThreadArgs *args = thread_args;
-    RenderCtx *ctx = args->ctx;
+    double time = inc(0.01, 360);
 
     const double aspect = (double) ctx->rows / ctx->cols;
 
     color_t tri_color = {90, 230, 95};
 
-    for (int i = args->start_idx; i < args->end_idx + 1;  i+=TRI_NPTS)
+    for (int i = 0; i < ctx->mesh->size;  i+=TRI_NPTS)
     {
 
         vec4 clip_space_tri[TRI_NPTS];
@@ -309,7 +296,7 @@ static void *object_thread(void *thread_args)
         {
             vec4 rotated_pt = {0, 0, 0, 1};
             vec3 norm_rot_axis = {0, 1, 0};
-            rotate_point(rotated_pt, norm_rot_axis, ctx->mesh->verts[i + j], 0);
+            rotate_point(rotated_pt, norm_rot_axis, ctx->mesh->verts[i + j], time);
 
             world_to_clip(clip_space_tri[j], rotated_pt, ctx->view_mat, aspect, FOV, NEAR_CLIP, FAR_CLIP);
         }
@@ -369,45 +356,6 @@ static void *object_thread(void *thread_args)
                 break;
             }
         }
-    }
-    return NULL;
-}
-
-// TODO: your threads are shit
-void draw_object_threads(RenderCtx *ctx)
-{
-    double time = inc(0.01, 360);
-    pthread_t threads[ctx->n_threads];
-    ThreadArgs *args[ctx->n_threads];
-
-    int offset = -1;
-    // drawing each thread's triangles
-    // TODO: this assumes all threads have an assigned size > 0
-    for (int i = 0; i < ctx->n_threads; i++)
-    {
-        args[i] = malloc(sizeof(ThreadArgs));
-        assert(args[i] != NULL);
-
-        args[i]->start_idx = offset + 1;
-        args[i]->end_idx = offset + (TRI_NPTS * ctx->thread_sizes[i]);
-        offset = args[i]->end_idx;
-
-        args[i]->time = time;
-
-        args[i]->ctx = ctx;
-
-        /* int ret = pthread_create(&threads[i], NULL, object_thread, args[i]); */
-        /* assert(ret == 0); */
-        object_thread(args[i]);
-    }
-
-    // the end_idx of the last thread should be the end of the vert array
-    assert(offset == ctx->mesh->size - 1);
-
-    for (int i = 0; i < ctx->n_threads; i++)
-    {
-        /* pthread_join(threads[i], NULL); */
-        free(args[i]);
     }
 }
 
