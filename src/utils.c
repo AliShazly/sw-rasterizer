@@ -58,7 +58,6 @@ int clamp(int val, int min, int max)
 
 double normalize(double val, double upper, double lower)
 {
-    assert(upper > lower);
     return (val - lower) / (upper - lower);
 }
 

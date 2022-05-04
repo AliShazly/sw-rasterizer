@@ -1,144 +1,83 @@
 #include "context.h"
 #include "rasterize.h"
 #include "utils.h"
+#include <MiniFB.h>
+#include <stdlib.h>
 
-#include <GL/glut.h>
-#include <sys/time.h>
+void resize_cb(struct mfb_window *window, int width, int height);
+void keyboard_cb(struct mfb_window *window, mfb_key key, mfb_key_mod mod,
+                 bool pressed);
 
-// all this is extremely temporary and messy
-// I just really don't want to learn how to do this in X11
+// clang-format off
+static vec3 lowercase_to_vec3[26][3] = {
+    {-0.1, 0, 0},  // 'a'
+    {-1}, {-1},
+    {0.1, 0, 0}, {0, 0.1, 0,},  // 'd' and 'e'
+    {-1}, {-1}, {-1}, {-1}, {-1}, {-1},
+    {-1}, {-1}, {-1}, {-1}, {-1},
+    {0, -0.1, 0},  // 'q'
+    {-1},
+    {0, 0, -0.1},  // 's'
+    {-1}, {-1}, {-1},
+    {0, 0, 0.1},  // 'w'
+    {-1}, {-1}, {-1}
+};
+// clang-format on
 
-#define CTX global_render_context_ptr
-RenderCtx *CTX;
+int main(int argc, char **argv) {
+    if (argc != 2) {
+        printf("Usage: %s <input_file>\n", argv[0]);
+        return 1;
+    }
+    RenderCtx ctx = init_renderer(argv[1]);
 
-static unsigned long long int global_frame_count = 1;
-static unsigned long long int global_usec_sum = 0;
+    struct mfb_window *window =
+        mfb_open_ex("Rasterizer", ctx.cols, ctx.rows, WF_RESIZABLE);
+    if (!window) {
+        fprintf(stderr, "Failed to open window\n");
+        return 1;
+    }
 
-void exit_func();
-void keyboard_func(unsigned char c, int x, int y);
-void window_reshape(int width, int height);
-void render_2d_texture();
+    mfb_set_user_data(window, &ctx);
+    mfb_set_resize_callback(window, resize_cb);
+    mfb_set_keyboard_callback(window, keyboard_cb);
 
-int main(int argc, char** argv)
-{
-    RenderCtx ctx = init_renderer();
-    CTX = &ctx;
+    uint32_t *mfb_buffer = calloc(ctx.cols * ctx.rows, sizeof(uint32_t));
 
-    glutInit(&argc, argv);
-    glutInitDisplayMode(GLUT_DEPTH | GLUT_DOUBLE | GLUT_RGB);
-    glutInitWindowSize(CTX->cols, CTX->rows);
-    glutCreateWindow("rasterizer");
+    do {
+        clear_buffers(&ctx);
+        draw_object(&ctx);
 
-    glutReshapeFunc(window_reshape);
-    glutDisplayFunc(render_2d_texture);
-    glutKeyboardFunc(keyboard_func);
-    atexit(exit_func);
-    glutMainLoop();
+        for (int i = 0; i < ctx.cols * ctx.rows; i++) {
+            unsigned char *pixel = ctx.buffer[i];
+            mfb_buffer[i] = MFB_RGB(pixel[0], pixel[1], pixel[2]);
+        }
+
+        int state = mfb_update_ex(window, mfb_buffer, ctx.cols, ctx.rows);
+        if (state < 0) {
+            window = NULL;
+            break;
+        }
+    } while (mfb_wait_sync(window));
+
+    free(mfb_buffer);
+    destroy_renderer(&ctx);
 }
 
-// glutMainLoop doesn't return control, need to cleanup this way
-void exit_func()
-{
-    long double usec_avg = global_usec_sum / (long double)global_frame_count;
-    double sec = (usec_avg / 1000000.);
-    printf("avg frametime: %f\n",sec);
-    printf("avg FPS: %f\n", 1/sec);
-    destroy_renderer(CTX);
+void resize_cb(struct mfb_window *window, int width, int height) {
+    int dim = imin(width, height);
+    mfb_set_viewport(window, 0, 0, dim, dim);
 }
 
-void keyboard_func(unsigned char c, int x, int y)
-{
-    if (c == 27)
-    {
-        exit(0);
-    }
-    else if (c == 'w')
-    {
-        vec3 offset = {0, 0, 0.01};
-        move_camera(CTX, offset);
-    }
-    else if (c == 's')
-    {
-        vec3 offset = {0, 0, -0.01};
-        move_camera(CTX, offset);
-    }
-    else if (c == 'a')
-    {
-        vec3 offset = {-0.01, 0, 0};
-        move_camera(CTX, offset);
-    }
-    else if (c == 'd')
-    {
-        vec3 offset = {0.01, 0, 0};
-        move_camera(CTX, offset);
-    }
-    else if (c == 'e')
-    {
-        vec3 offset = {0, 0.01, 0};
-        move_camera(CTX, offset);
-    }
-    else if (c == 'q')
-    {
-        vec3 offset = {0, -0.01, 0};
-        move_camera(CTX, offset);
+void keyboard_cb(struct mfb_window *window, mfb_key key, mfb_key_mod mod,
+                 bool pressed) {
+    if (pressed && key >= 'A' && key <= 'Z') {
+        unsigned char idx_by_key = key - 'A';
+        double *offset = *lowercase_to_vec3[idx_by_key];
+
+        if (*offset != -1) {
+            RenderCtx *ctx = mfb_get_user_data(window);
+            move_camera(ctx, offset);
+        }
     }
 }
-
-void window_reshape(int width, int height)
-{
-    int min = imin(width, height);
-    glViewport(0, 0, min, min);
-}
-
-// draws a quad over the screen, writes the buffer to it as a texture
-void render_2d_texture()
-{
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glEnable(GL_TEXTURE_2D);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-
-    struct timeval tval_before, tval_after, tval_result;
-    gettimeofday(&tval_before, NULL);
-
-    clear_buffers(CTX);
-    /* draw_grid(CTX); */
-    draw_object(CTX);
-    /* draw_object_wireframe(CTX); */
-
-    gettimeofday(&tval_after, NULL);
-    timersub(&tval_after, &tval_before, &tval_result);
-    global_frame_count+=1;
-    global_usec_sum+=tval_result.tv_usec; // usec/1000000 for seconds
-
-
-    glTexImage2D(GL_TEXTURE_2D,
-               0,                    // level 0
-               3,                    // use only R, G, and B components
-               CTX->cols, CTX->rows, // texture width x height
-               0,                    // no border
-               GL_RGB,               // texels are in RGB format
-               GL_UNSIGNED_BYTE,     // color components are unsigned bytes
-               CTX->buffer);
-
-    // texcoords are arranged to fit 2D arrays
-    glBegin(GL_QUADS);
-        glTexCoord2f(0.0, 1.0);
-        glVertex2f(-1, -1);
-
-        glTexCoord2f(1.0, 1.0);
-        glVertex2f(1, -1);
-
-        glTexCoord2f(1.0, 0.0);
-        glVertex2f(1, 1);
-
-        glTexCoord2f(0.0, 0.0);
-        glVertex2f(-1, 1);
-    glEnd();
-
-    glutSwapBuffers();
-    glutPostRedisplay();
-}
-

@@ -136,7 +136,7 @@ static void triangulate(list *face_verts, list *out_list)
     }
 }
 
-void parse_obj(char *filename, size_t *out_size,
+void parse_obj(const char *filename, size_t *out_size,
         double (**out_verts)[3],
         double (**out_texcoords)[2],
         double (**out_normals)[3])
@@ -156,7 +156,11 @@ void parse_obj(char *filename, size_t *out_size,
     assert(buffer != NULL);
 
     FILE *fp = fopen(filename, "r");
-    assert(fp != NULL);
+    if (fp == NULL)
+    {
+        fprintf(stderr, "Failed to open file: %s\n", filename);
+        exit(EXIT_FAILURE);
+    }
 
     for(;;)
     {

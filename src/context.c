@@ -22,7 +22,7 @@ void move_camera(RenderCtx *ctx, vec3 offset)
     mat4x4_translate_in_place(ctx->view_mat, -offset[0], -offset[1], -offset[2]);
 }
 
-RenderCtx init_renderer()
+RenderCtx init_renderer(const char *mesh_filepath)
 {
     RenderCtx ctx;
     Mesh *mesh = malloc(sizeof(Mesh));
@@ -41,7 +41,7 @@ RenderCtx init_renderer()
 
     clear_buffers(&ctx);
 
-    parse_obj("./models/teapot_maya.obj",
+    parse_obj(mesh_filepath,
             &mesh->size, &mesh->verts, &mesh->texcoords, &mesh->normals);
     // parse_obj should return all faces as tris, but let's make sure
     assert(mesh->size % 3 == 0);

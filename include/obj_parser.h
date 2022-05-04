@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include "list.h"
 
-void parse_obj(char *filename, size_t *out_size,
+void parse_obj(const char *filename, size_t *out_size,
         double (**out_verts)[3],
         double (**out_texcoords)[2],
         double (**out_normals)[3]);
